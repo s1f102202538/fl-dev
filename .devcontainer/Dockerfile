@@ -7,15 +7,15 @@ ARG USER_GID=1000
 WORKDIR /fl-dev
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential \
+    && apt-get install -y --no-install-recommends build-essential sudo \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --upgrade pip \
     && groupadd --gid ${USER_GID} ${USERNAME} \
     && useradd --uid ${USER_UID} --gid ${USER_GID} -m ${USERNAME} \
-    && mkdir -p /fl-dev/venv \
-    && chown -R ${USER_UID}:${USER_GID} /fl-dev/venv \
-    && python -m venv /fl-dev/venv \
-    && echo "source /fl-dev/venv/bin/activate" >> /etc/bash.bashrc \
-    && echo "export PATH=/fl-dev/venv/bin:$PATH" >> /etc/bash.bashrc
+    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/${USERNAME} \
+    && chmod 0440 /etc/sudoers.d/${USERNAME} \
+    && echo "source /venv/bin/activate" >> /etc/bash.bashrc \
+    && echo "export PATH=/venv/bin:$PATH" >> /etc/bash.bashrc \
+    && echo 'export PATH="$HOME/.local/bin:$PATH"' >> /etc/bash.bashrc \
+    && echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin-path.sh
 
 USER ${USERNAME}
