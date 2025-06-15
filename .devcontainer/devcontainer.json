@@ -1,13 +1,11 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/python
 {
+	"service": "fl-dev",
 	"name": "fl-dev",
 	"workspaceFolder": "/fl-dev",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	"build": {
-		"dockerfile": "Dockerfile",
-		"context": "."
-	},
+	"dockerComposeFile": ["./docker-compose.yml"],
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
