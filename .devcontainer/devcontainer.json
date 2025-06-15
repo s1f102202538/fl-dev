@@ -26,6 +26,7 @@
 			// Add the IDs of extensions to install here. Extensions will be installed in the container.
 			"extensions": [
 				"github.copilot",
+				"github.copilot-chat",
 				"editorconfig.editorconfig",
 				"shardulm94.trailing-spaces",
 				"christian-kohler.path-intellisense",
