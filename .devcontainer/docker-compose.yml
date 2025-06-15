@@ -1,5 +1,6 @@
 services:
   fl-dev:
+    user: "vscode"
     working_dir: /fl-dev
     build:
       context: .
@@ -10,7 +11,6 @@ services:
       - ..:/fl-dev
       - fl-dev-venv:/fl-dev/venv
     tty: true
-    user: "vscode"
 
 volumes:
   fl-dev-venv:
