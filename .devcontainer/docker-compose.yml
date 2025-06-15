@@ -1,0 +1,16 @@
+services:
+  fl-dev:
+    working_dir: /fl-dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ..:/fl-dev
+      - fl-dev-venv:/fl-dev/venv
+    tty: true
+    user: "vscode"
+
+volumes:
+  fl-dev-venv:
