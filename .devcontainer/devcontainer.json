@@ -6,6 +6,7 @@
 	"workspaceFolder": "/fl-dev",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"dockerComposeFile": ["./docker-compose.yml"],
+	"postCreateCommand": "/bin/bash .devcontainer/postCreateCommand.sh",
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
 	"features": {
