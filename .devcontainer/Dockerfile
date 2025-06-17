@@ -13,7 +13,7 @@ RUN apt-get update \
     && chown -R ${USERNAME}:${USERNAME} /home/${USERNAME} \
     && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers.d/${USERNAME} \
     && chmod 0440 /etc/sudoers.d/${USERNAME} \
-    && echo "source /venv/bin/activate" >> /etc/bash.bashrc \
+    && echo "if [ -f /home/vscode/fl-dev/venv/bin/activate ]; then source /home/vscode/fl-dev/venv/bin/activate; fi" >> /etc/bash.bashrc \
     && echo 'export PATH="$HOME/.local/bin:$PATH"' >> /etc/bash.bashrc \
     && echo 'export PATH="$HOME/.local/bin:$PATH"' > /etc/profile.d/local-bin-path.sh
 

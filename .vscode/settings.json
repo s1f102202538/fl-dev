@@ -1,7 +1,7 @@
 {
   // 設定ファイルの指定
   "mypy-type-checker.args": [
-    "--config=pyproject.toml"
+    "--config=.vscode/pyproject.toml"
   ],
 
   // Ruffの設定
