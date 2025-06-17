@@ -3,7 +3,7 @@
 {
 	"service": "fl-dev",
 	"name": "fl-dev",
-	"workspaceFolder": "/fl-dev",
+    "workspaceFolder": "/home/vscode/fl-dev",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"dockerComposeFile": ["./docker-compose.yml"],
 	"postCreateCommand": "/bin/bash .devcontainer/postCreateCommand.sh",
@@ -31,6 +31,7 @@
 				"editorconfig.editorconfig",
 				"shardulm94.trailing-spaces",
 				"christian-kohler.path-intellisense",
+				"tamasfe.even-better-toml",
 				"eamodio.gitlens",
 				"ms-python.python",
 				"ms-python.vscode-pylance",

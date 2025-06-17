@@ -1,15 +1,17 @@
 services:
   fl-dev:
     user: "vscode"
-    working_dir: /fl-dev
+    working_dir: /home/vscode/fl-dev
     build:
       context: .
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     volumes:
-      - ..:/fl-dev
-      - fl-dev-venv:/fl-dev/venv
+      - ../:/home/vscode/fl-dev
+      - fl-dev-venv:/home/vscode/fl-dev/venv
+    environment:
+      - HOME=/home/vscode
     tty: true
 
 volumes:
