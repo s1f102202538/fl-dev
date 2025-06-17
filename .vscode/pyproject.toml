@@ -1,9 +1,5 @@
-############
 # mypyの設定
-############
-
 # https://mypy.readthedocs.io/en/stable/config_file.html
-
 [tool.mypy]
 python_version = "3.12"
 show_error_context = true  # エラー時のメッセージを詳細表示
@@ -16,53 +12,87 @@ warn_redundant_casts = true  # 冗長なキャストに警告
 [[tool.mypy.overrides]]
 # サードパーティの[import-untyped]を無視する
 module = [
-    'requests/*',
-    'psutil',
+  'requests/*',
+  'psutil',
 ]
 ignore_missing_imports = true
 
-############
 # Ruffの設定
-############
-
 [tool.ruff]
-line-length = 120
-
-# Option Settings
-## https://gihyo.jp/article/2023/03/monthly-python-2303
-## 略称一覧: https://pypi.org/project/ruff/0.0.242/#supported-rule
-
-## select: 指定したルールをチェックの対象とする
-lint.select = ["ALL"]
-## ignore: 指定したルールをチェックの対象としない
-lint.ignore = [
-    "D", # Docstringを中途半端にしか書いていないので、除外する
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
 ]
+
+# Same as Black.
+line-length = 160
+indent-width = 2
 
 # Assume Python 3.12
 target-version = "py312"
 
-[tool.ruff.lint.per-file-ignores]
-# ファイル毎に無効とする設定
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`) codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = ["E4", "E7", "E9", "F"]
+ignore = []
 
-# https://docs.astral.sh/ruff/settings/#lint_per-file-ignores
-"*.py" = [
-    "ANN101", # selfの型を省略するため
-    "ANN102", # clsの型を省略するため
-    "COM812", # 末尾のカンマを必須としない
-    "ERA001", # コメントアウト文を許可
-    "FBT001", # 関数の引数にbooleanを許可(TODO:見直し)
-    "FBT002", # 関数の引数にbooleanを許可(TODO:見直し)
-    "INP001", # __init__.pyを必須としない
-    "PT009", # assertEqualなどを使うため
-    "PTH207", # glob.globを許可
-    "S311", # randomを許可
-    "S603", # Shell無しのsubprocessを許可
-    "T201", # print文を許可するため
-    "TRY002", # 標準のExceptionの使用を許可
-]
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
 
-[tool.ruff.lint.pydocstyle]
-# pydocstyleを無視しているのでこの設定は無意味だが、
-# いずれdocstringのスタイルを統一するので設定だけしておく
-convention = "google"
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# Enable auto-formatting of code examples in docstrings. Markdown,
+# reStructuredText code/literal blocks and doctests are all supported.
+#
+# This is currently disabled by default, but it is planned for this
+# to be opt-out in the future.
+docstring-code-format = false
+
+# Set the line length limit used when formatting code snippets in
+# docstrings.
+#
+# This only has an effect when the `docstring-code-format` setting is
+# enabled.
+docstring-code-line-length = "dynamic"
