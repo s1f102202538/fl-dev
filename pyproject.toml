@@ -12,10 +12,10 @@ warn_redundant_casts = true  # 冗長なキャストに警告
 [[tool.mypy.overrides]]
 # サードパーティの[import-untyped]を無視する
 module = [
-  'requests/*',
-  'psutil',
+  "flwr_datasets.*",
+  "torchvision.*"
 ]
-ignore_missing_imports = true
+follow_untyped_imports = true
 
 # Ruffの設定
 [tool.ruff]

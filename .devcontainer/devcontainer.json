@@ -31,6 +31,7 @@
 				"editorconfig.editorconfig",
 				"shardulm94.trailing-spaces",
 				"christian-kohler.path-intellisense",
+        "streetsidesoftware.code-spell-checker",
 				"tamasfe.even-better-toml",
 				"eamodio.gitlens",
 				"ms-python.python",

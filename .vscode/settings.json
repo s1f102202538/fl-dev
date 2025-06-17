@@ -1,7 +1,7 @@
 {
   // 設定ファイルの指定
   "mypy-type-checker.args": [
-    "--config=.vscode/pyproject.toml"
+    "--config=pyproject.toml"
   ],
 
   // Ruffの設定
@@ -12,8 +12,8 @@
     // デフォルトのformatterにruffを指定
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.codeActionsOnSave": {
-      // 保存時にimportを整理
-      "source.organizeImports": "explicit"
+    // 保存時にimportを整理
+    "source.organizeImports": "explicit"
     }
   },
 }
