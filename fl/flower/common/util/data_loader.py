@@ -1,9 +1,6 @@
-import json
-from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, Tuple
 
-from flwr.common.typing import UserConfig
+from flwr.common.typing import UserConfigValue
 from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import DirichletPartitioner
 from torch.utils.data import DataLoader
@@ -29,7 +26,7 @@ TRAIN_TRANSFORMS = Compose(
 )
 
 
-def load_data(partition_id: int, num_partitions: int) -> Tuple[DataLoader, DataLoader]:
+def load_data(partition_id: UserConfigValue, num_partitions: UserConfigValue) -> Tuple[DataLoader, DataLoader]:
   """Load partition FashionMNIST data."""
   # Only initialize `FederatedDataset` once
   global fds
@@ -50,25 +47,9 @@ def load_data(partition_id: int, num_partitions: int) -> Tuple[DataLoader, DataL
 
   train_partition = partition_train_test["train"].with_transform(apply_train_transforms)
   test_partition = partition_train_test["test"].with_transform(apply_eval_transforms)
-  trainloader = DataLoader(train_partition, batch_size=32, shuffle=True)
-  testloader = DataLoader(test_partition, batch_size=32)
-  return trainloader, testloader
-
-
-def create_run_dir(config: UserConfig) -> Tuple[Path, str]:
-  """Create a directory where to save results from this run."""
-  # Create output directory given current timestamp
-  current_time = datetime.now()
-  run_dir = current_time.strftime("%Y-%m-%d/%H-%M-%S")
-  # Save path is based on the current directory
-  save_path = Path.cwd() / f"outputs/{run_dir}"
-  save_path.mkdir(parents=True, exist_ok=False)
-
-  # Save run config as json
-  with open(f"{save_path}/run_config.json", "w", encoding="utf-8") as fp:
-    json.dump(config, fp)
-
-  return save_path, run_dir
+  train_loader = DataLoader(train_partition, batch_size=32, shuffle=True)
+  test_loader = DataLoader(test_partition, batch_size=32)
+  return train_loader, test_loader
 
 
 def apply_train_transforms(batch: Dict[str, Any]) -> Dict[str, Any]:

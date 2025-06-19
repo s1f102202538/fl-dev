@@ -16,4 +16,10 @@
     "source.organizeImports": "explicit"
     }
   },
+
+  // https://code.visualstudio.com/docs/python/editing#_enable-auto-imports
+  "python.analysis.autoImportCompletions": true,
+  // enable user files
+  // https://github.com/microsoft/pylance-release/blob/main/docs/settings/python_analysis_indexing.md#what-is-pythonanalysisindexing
+  "python.analysis.indexing": true,
 }

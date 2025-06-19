@@ -21,13 +21,16 @@ packages = ["."]
 publisher = "shigeo"
 
 [tool.flwr.app.components]
-serverapp = "flower.server.server_app.py:app"
-clientapp = "flower.client.client_app.py:app"
+serverapp = "flower.server.server_app:app"
+clientapp = "flower.client.client_app:app"
 
 [tool.flwr.app.config]
-num-server-rounds = 3
-fraction-fit = 0.5
+num-server-rounds = 10
+fraction-fit = 0.25
+fraction-evaluate = 0.5
 local-epochs = 1
+server-device = "cpu"
+use-wandb = true
 
 [tool.flwr.federations]
 default = "local-simulation"

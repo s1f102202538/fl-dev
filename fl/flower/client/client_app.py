@@ -1,10 +1,16 @@
 """pytorch-example: A Flower / PyTorch app."""
 
+import numpy as np
 import torch
-import torch.nn as nn
+from flower.common.models.mini_cnn import MiniCNN
+from flower.common.task.cnn_task import CNNTask
+from flower.common.util.data_loader import load_data
+from flower.common.util.util import get_weights, set_weights
 from flwr.client import ClientApp, NumPyClient
-from flwr.common import Array, ArrayRecord, Context, RecordDict
-from pytorch_example.task import Net, get_weights, load_data, set_weights, test, train
+from flwr.client.client import Client
+from flwr.common import ArrayRecord, Context, RecordDict
+from flwr.common.typing import NDArrays, UserConfigValue
+from torch.utils.data import DataLoader
 
 
 # Define Flower Client and client_fn
@@ -16,17 +22,17 @@ class FlowerClient(NumPyClient):
   and updated during `fit()` and used during `evaluate()`.
   """
 
-  def __init__(self, net: nn, client_state: RecordDict, trainloader, valloader, local_epochs):
-    self.net: Net = net
+  def __init__(self, net: MiniCNN, client_state: RecordDict, train_loader: DataLoader, val_loader: DataLoader, local_epochs: UserConfigValue) -> None:
+    self.net = net
     self.client_state = client_state
-    self.trainloader = trainloader
-    self.valloader = valloader
-    self.local_epochs = local_epochs
+    self.train_loader = train_loader
+    self.val_loader = val_loader
+    self.local_epochs: int = int(local_epochs)
     self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     self.net.to(self.device)
     self.local_layer_name = "classification-head"
 
-  def fit(self, parameters, config):
+  def fit(self, parameters: NDArrays, config: dict) -> tuple[NDArrays, int, dict]:
     """Train model locally.
 
     The client stores in its context the parameters of the last layer in the model
@@ -41,9 +47,9 @@ class FlowerClient(NumPyClient):
     # had at the end of the last fit() round it participated in
     self._load_layer_weights_from_state()
 
-    train_loss = train(
+    train_loss = CNNTask.train(
       self.net,
-      self.trainloader,
+      self.train_loader,
       self.local_epochs,
       lr=float(config["lr"]),
       device=self.device,
@@ -54,28 +60,28 @@ class FlowerClient(NumPyClient):
     # Return locally-trained model and metrics
     return (
       get_weights(self.net),
-      len(self.trainloader.dataset),
+      len(self.train_loader.dataset),  # type: ignore
       {"train_loss": train_loss},
     )
 
-  def _save_layer_weights_to_state(self):
+  def _save_layer_weights_to_state(self) -> None:
     """Save last layer weights to state."""
-    arr_record = ArrayRecord(self.net.fc2.state_dict())
+    arr_record = ArrayRecord(self.net.fc2.state_dict())  # type: ignore
 
     # Add to RecordDict (replace if already exists)
     self.client_state[self.local_layer_name] = arr_record
 
-  def _load_layer_weights_from_state(self):
+  def _load_layer_weights_from_state(self) -> None:
     """Load last layer weights to state."""
     if self.local_layer_name not in self.client_state.array_records:
       return
 
-    state_dict = self.client_state[self.local_layer_name].to_torch_state_dict()
+    state_dict = self.client_state[self.local_layer_name].to_torch_state_dict()  # type: ignore
 
     # apply previously saved classification head by this client
     self.net.fc2.load_state_dict(state_dict, strict=True)
 
-  def evaluate(self, parameters, config):
+  def evaluate(self, parameters: list[np.ndarray], config: dict) -> tuple[float, int, dict]:
     """Evaluate the global model on the local validation set.
 
     Note the classification head is replaced with the weights this client had the
@@ -85,16 +91,16 @@ class FlowerClient(NumPyClient):
     # Override weights in classification layer with those this client
     # had at the end of the last fit() round it participated in
     self._load_layer_weights_from_state()
-    loss, accuracy = test(self.net, self.valloader, self.device)
-    return loss, len(self.valloader.dataset), {"accuracy": accuracy}
+    loss, accuracy = CNNTask.test(self.net, self.val_loader, self.device)
+    return loss, len(self.val_loader.dataset), {"accuracy": accuracy}  # type: ignore
 
 
-def client_fn(context: Context):
+def client_fn(context: Context) -> Client:
   # Load model and data
-  net = Net()
+  net = MiniCNN()
   partition_id = context.node_config["partition-id"]
   num_partitions = context.node_config["num-partitions"]
-  trainloader, valloader = load_data(partition_id, num_partitions)
+  train_loader, val_loader = load_data(partition_id, num_partitions)
   local_epochs = context.run_config["local-epochs"]
 
   # Return Client instance
@@ -102,7 +108,7 @@ def client_fn(context: Context):
   # participation rounds. Note that each client always
   # receives the same Context instance (it's a 1:1 mapping)
   client_state = context.state
-  return FlowerClient(net, client_state, trainloader, valloader, local_epochs).to_client()
+  return FlowerClient(net, client_state, train_loader, val_loader, local_epochs).to_client()
 
 
 # Flower ClientApp
