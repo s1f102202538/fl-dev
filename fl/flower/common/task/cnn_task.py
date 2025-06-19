@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 
 class CNNTask:
   @staticmethod
-  def train(net: nn.Module, train_loader: DataLoader, epochs: int, lr: float, device: str) -> float:
+  def train(net: nn.Module, train_loader: DataLoader, epochs: int, lr: float, device: torch.device) -> float:
     net.to(device)
     criterion = nn.CrossEntropyLoss().to(device)
     optimizer = SGD(net.parameters(), lr=lr, momentum=0.9)
@@ -26,14 +26,14 @@ class CNNTask:
     return avg_train_loss
 
   @staticmethod
-  def test(net: nn.Module, test_loader: DataLoader, device: str) -> tuple[float, float]:
+  def test(net: nn.Module, test_loader: DataLoader, device: torch.device) -> tuple[float, float]:
     net.to(device)
     criterion = nn.CrossEntropyLoss()
     correct, loss = 0, 0.0
     with torch.no_grad():
       for batch in test_loader:
-        images = batch["images"].to(device)
-        labels = batch["labels"].to(device)
+        images = batch["image"].to(device)
+        labels = batch["label"].to(device)
         outputs = net(images)
         loss += criterion(outputs, labels).item()
         correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
