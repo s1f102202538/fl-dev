@@ -32,7 +32,7 @@ def load_data(partition_id: UserConfigValue, num_partitions: UserConfigValue) ->
   global fds
   if fds is None:
     partitioner = DirichletPartitioner(
-      num_partitions=num_partitions,
+      num_partitions=int(num_partitions),
       partition_by="label",
       alpha=1.0,
       seed=42,
@@ -41,14 +41,15 @@ def load_data(partition_id: UserConfigValue, num_partitions: UserConfigValue) ->
       dataset="zalando-datasets/fashion_mnist",
       partitioners={"train": partitioner},
     )
-  partition = fds.load_partition(partition_id)
+  partition = fds.load_partition(int(partition_id))
   # Divide data on each node: 80% train, 20% test
   partition_train_test = partition.train_test_split(test_size=0.2, seed=42)
 
   train_partition = partition_train_test["train"].with_transform(apply_train_transforms)
   test_partition = partition_train_test["test"].with_transform(apply_eval_transforms)
-  train_loader = DataLoader(train_partition, batch_size=32, shuffle=True)
-  test_loader = DataLoader(test_partition, batch_size=32)
+
+  train_loader = DataLoader(train_partition, batch_size=32, shuffle=True)  # type: ignore
+  test_loader = DataLoader(test_partition, batch_size=32)  # type: ignore
   return train_loader, test_loader
 
 
