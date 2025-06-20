@@ -3,7 +3,7 @@
 {
 	"service": "fl-dev",
 	"name": "fl-dev",
-    "workspaceFolder": "/home/vscode/fl-dev",
+  "workspaceFolder": "/home/vscode/fl-dev",
 	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
 	"dockerComposeFile": ["./docker-compose.yml"],
 	"postCreateCommand": "/bin/bash .devcontainer/postCreateCommand.sh",
@@ -37,8 +37,7 @@
 				"eamodio.gitlens",
 				"ms-python.python",
 				"ms-python.vscode-pylance",
-				"charliermarsh.ruff",
-				"ms-python.mypy-type-checker"
+				"charliermarsh.ruff"
 			]
 		}
 	},

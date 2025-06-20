@@ -9,9 +9,10 @@ services:
       - "8000:8000"
     volumes:
       - ../:/home/vscode/fl-dev
-      - fl-dev-venv:/home/vscode/fl-dev/venv
+      - fl-dev-venv:/home/vscode/fl-dev/.venv
     environment:
       - HOME=/home/vscode
+      - UV_LINK_MODE=copy
     tty: true
 
 volumes:

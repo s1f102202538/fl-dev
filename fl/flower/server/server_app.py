@@ -67,10 +67,10 @@ def server_fn(context: Context) -> ServerAppComponents:
   # FlowerDatasets. However, we don't use FlowerDatasets for the server since
   # partitioning is not needed.
   # We make use of the "test" split only
-  global_test_set = load_dataset("zalando-datasets/fashion_mnist")["test"]
+  global_test_set = load_dataset("zalando-datasets/fashion_mnist", split="test")
 
   testloader = DataLoader(
-    global_test_set.with_transform(apply_eval_transforms),
+    global_test_set.with_transform(apply_eval_transforms),  # type: ignore
     batch_size=32,
   )
 
