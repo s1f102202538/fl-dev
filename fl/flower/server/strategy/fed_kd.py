@@ -3,13 +3,14 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
 from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, NDArrays, Parameters, Scalar
 from flwr.common.logger import log
+from flwr.common.typing import UserConfig
 from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import Strategy
 from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor, stack, tensor
 
-from fl.flower.common.util.util import tensor_to_base64
+from fl.flower.common.util.util import create_run_dir, tensor_to_base64
 
 
 class FedKD(Strategy):
@@ -36,6 +37,8 @@ class FedKD(Strategy):
     fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
     evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
     inplace: bool = True,
+    run_config: UserConfig,
+    use_wandb: bool = False,
   ) -> None:
     self.fraction_fit = fraction_fit
     self.fraction_evaluate = fraction_evaluate
@@ -51,6 +54,9 @@ class FedKD(Strategy):
     self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
     self.inplace = inplace
     self.avg_logits: List[Tensor] = []  # 集約したロジット
+
+    self.save_path, self.run_dir = create_run_dir(run_config)
+    self.use_wandb = use_wandb
 
   @override
   def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:

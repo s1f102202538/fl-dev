@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Tuple
 
 import torch
 import torch.nn as nn
+from flwr.common import Scalar
 from flwr.common.typing import NDArrays, UserConfig
 from torch import Tensor, load, save
 
@@ -22,7 +23,7 @@ def set_weights(net: nn.Module, parameters: NDArrays) -> None:
   net.load_state_dict(state_dict, strict=True)
 
 
-def weighted_average(metrics: List[Tuple[int, Dict[str, Any]]]) -> object:
+def weighted_average(metrics: List[Tuple[int, Dict[str, Any]]]) -> Dict[str, Scalar]:
   # Multiply accuracy of each client by number of examples used
   accuracies = [num_examples * m["accuracy"] for num_examples, m in metrics]
   examples = [num_examples for num_examples, _ in metrics]
