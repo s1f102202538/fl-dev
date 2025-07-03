@@ -1,6 +1,5 @@
+from flower.server.apps.fed_kd_server import FedKDServer
 from flwr.server import ServerApp
 
-from fl.flower.server.apps.flower_demo_server import FlowerDemoServer
-
 # Create ServerApp
-app = ServerApp(server_fn=FlowerDemoServer.server_fn)
+app = ServerApp(server_fn=FedKDServer.server_fn)

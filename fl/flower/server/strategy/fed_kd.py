@@ -1,6 +1,8 @@
 from logging import WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
+import torch
+from flower.common.util.util import base64_to_batch_list, batch_list_to_base64, create_run_dir
 from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, NDArrays, Parameters, Scalar
 from flwr.common.logger import log
 from flwr.common.typing import UserConfig
@@ -8,9 +10,7 @@ from flwr.server.client_manager import ClientManager
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import Strategy
 from flwr.server.strategy.aggregate import weighted_loss_avg
-from torch import Tensor, stack, tensor
-
-from fl.flower.common.util.util import base64_to_tensor, create_run_dir, tensor_to_base64
+from torch import Tensor, stack
 
 
 class FedKD(Strategy):
@@ -53,7 +53,7 @@ class FedKD(Strategy):
     self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
     self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
     self.inplace = inplace
-    self.avg_logits: List[Tensor] = []  # 集約したロジット
+    self.avg_logits: List[Tensor] = []
 
     self.save_path, self.run_dir = create_run_dir(run_config)
     self.use_wandb = use_wandb
@@ -100,8 +100,16 @@ class FedKD(Strategy):
     """
 
     config = self.on_fit_config_fn(server_round) if self.on_fit_config_fn else {}
+
+    # print(
+    #   "server_send_logits:",
+    #   [b.mean().item() for b in self.avg_logits],
+    # )
+
+    # 前回のラウンドで集約されたロジットがある場合のみ追加
     if self.avg_logits:
-      config["avg_logits"] = tensor_to_base64(self.avg_logits)
+      config["avg_logits"] = batch_list_to_base64(self.avg_logits)
+    # 初回ラウンドではロジットが存在しないため、avg_logitsキーを含めない
     # parameters は None を返す
     fit_ins = FitIns(parameters, config)
 
@@ -149,18 +157,50 @@ class FedKD(Strategy):
         the global model parameters remain the same.
     """
 
-    logits_list = []
+    logits_batch_lists = []
     for _, fit_res in results:
       if "logits" in fit_res.metrics:
-        logits_tensor = base64_to_tensor(str(fit_res.metrics["logits"]))
-        logits_list.append(logits_tensor)
+        # バッチリスト形式でロジットを取得
+        logits_batch_list = base64_to_batch_list(str(fit_res.metrics["logits"]))
 
-    if logits_list:
-      avg_logits = stack(logits_list).mean(dim=0)
-      # 集約したロジットの更新
-      self.avg_logits = avg_logits.tolist()
+        # print("Server received logits stats:", [b.mean().item() for b in logits_batch_list])
 
-    return super().aggregate_fit(server_round, results, failures)
+        # NaN/Infを含むバッチは除外
+        filtered_batch_list = [b for b in logits_batch_list if not torch.isnan(b).any() and not torch.isinf(b).any()]
+        if len(filtered_batch_list) < len(logits_batch_list):
+          print(f"[FedKD] Skipped {len(logits_batch_list) - len(filtered_batch_list)} batches with NaN/Inf in logits from a client.")
+        if filtered_batch_list:
+          logits_batch_lists.append(filtered_batch_list)
+
+    if logits_batch_lists:
+      # 各バッチごとに平均化
+      # 最初のクライアントのバッチ数を基準とする
+      num_batches = min(len(b) for b in logits_batch_lists)
+      avg_logits_batches = []
+
+      for batch_idx in range(num_batches):
+        # 同じバッチインデックスのロジットを収集
+        batch_logits = []
+        for client_batches in logits_batch_lists:
+          if batch_idx < len(client_batches):
+            batch_logits.append(client_batches[batch_idx])
+
+        if batch_logits:
+          # このバッチのロジットを平均化
+          avg_batch_logits = stack(batch_logits).mean(dim=0)
+          avg_logits_batches.append(avg_batch_logits)
+
+      # 集約したロジットの更新（バッチリストとして保存）
+      self.avg_logits = avg_logits_batches
+
+    # FedKDではパラメータの集約は行わないため、Noneと空の辞書を返す
+    # メトリクスの集約は行う
+    aggregated_metrics = {}
+    if self.fit_metrics_aggregation_fn:
+      fit_metrics = [(res.num_examples, res.metrics) for _, res in results]
+      aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
+
+    return None, aggregated_metrics
 
   @override
   def configure_evaluate(self, server_round: int, parameters: Parameters, client_manager: ClientManager) -> List[Tuple[ClientProxy, EvaluateIns]]:
@@ -187,8 +227,10 @@ class FedKD(Strategy):
 
     # 評価用の設定を作成
     config = {}
+    # 前回のラウンドで集約されたロジットがある場合のみ追加
     if self.avg_logits:
-      config["avg_logits"] = tensor_to_base64(self.avg_logits)
+      config["avg_logits"] = batch_list_to_base64(self.avg_logits)
+    # 初回ラウンドではロジットが存在しないため、avg_logitsキーを含めない
     evaluate_ins = EvaluateIns(parameters, config)
 
     # 評価に参加するクライアントをサンプリング

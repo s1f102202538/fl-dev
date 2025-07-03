@@ -26,8 +26,8 @@ clientapp = "flower.client.client_app:app"
 
 [tool.flwr.app.config]
 num-server-rounds = 10
-fraction-fit = 0.25
-fraction-evaluate = 0.5
+fraction-fit = 1.0
+fraction-evaluate = 1.0
 local-epochs = 1
 server-device = "cpu"
 use-wandb = true
@@ -36,4 +36,4 @@ use-wandb = true
 default = "local-simulation"
 
 [tool.flwr.federations.local-simulation]
-options.num-supernodes = 10
+options.num-supernodes = 2

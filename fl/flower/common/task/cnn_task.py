@@ -42,7 +42,7 @@ class CNNTask:
     return loss, accuracy
 
   @staticmethod
-  def inference(net: nn.Module, data_loader: DataLoader, device: torch.device) -> torch.Tensor:
+  def inference(net: nn.Module, data_loader: DataLoader, device: torch.device) -> list[torch.Tensor]:
     net.to(device)
     net.eval()
     logits = []
@@ -51,4 +51,5 @@ class CNNTask:
         images = batch["image"].to(device)
         outputs = net(images)
         logits.append(outputs.cpu())
-    return torch.cat(logits, dim=0)
+
+    return logits

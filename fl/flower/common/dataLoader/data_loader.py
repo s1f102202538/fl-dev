@@ -81,10 +81,10 @@ def load_data(partition_id: UserConfigValue, num_partitions: UserConfigValue) ->
   return train_loader, test_loader
 
 
-def load_public_data(batch_size: int = 32) -> DataLoader:
+def load_public_data(batch_size: int = 32, max_samples: int = 1000) -> DataLoader:
   """Load public FashionMNIST test data that is common to all clients."""
   # Load the test split of FashionMNIST dataset
-  public_dataset = load_dataset("zalando-datasets/fashion_mnist", split="test")
+  public_dataset = load_dataset("zalando-datasets/fashion_mnist", split=f"test[:{max_samples}]")
 
   # Create a PyTorch Dataset wrapper with transforms
   public_dataset_wrapped = PublicDataset(public_dataset, transform=EVAL_TRANSFORMS)

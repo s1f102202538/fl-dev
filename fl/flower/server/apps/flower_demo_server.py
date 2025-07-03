@@ -2,6 +2,7 @@ from typing import Callable, Tuple
 
 import torch
 from datasets import load_dataset
+from flower.common.dataLoader.data_loader import apply_eval_transforms
 from flower.common.models.mini_cnn import MiniCNN
 from flower.common.task.cnn_task import CNNTask
 from flower.common.util.util import get_weights, set_weights, weighted_average
@@ -10,8 +11,6 @@ from flwr.common import Context, ndarrays_to_parameters
 from flwr.common.typing import NDArrays, UserConfig
 from flwr.server import ServerAppComponents, ServerConfig
 from torch.utils.data import DataLoader
-
-from fl.flower.common.dataLoader.data_loader import apply_eval_transforms
 
 
 class FlowerDemoServer:

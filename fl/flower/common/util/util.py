@@ -48,14 +48,14 @@ def create_run_dir(config: UserConfig) -> Tuple[Path, str]:
   return save_path, run_dir
 
 
-def tensor_to_base64(tensor_list: List[Tensor]) -> str:
+def batch_list_to_base64(batch_list: List[Tensor]) -> str:
+  """Convert a list of tensors (batches) to base64 string."""
   buffer = io.BytesIO()
-  if tensor_list:
-    save(tensor_list, buffer)
-    return base64.b64encode(buffer.getvalue()).decode("utf-8")
-  return ""
+  save(batch_list, buffer)
+  return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
-def base64_to_tensor(b64str: str) -> List[Tensor]:
+def base64_to_batch_list(b64str: str) -> List[Tensor]:
+  """Convert base64 string to a list of tensors (batches)."""
   buffer = io.BytesIO(base64.b64decode(b64str))
   return load(buffer)

@@ -1,10 +1,9 @@
 from typing import Dict
 
 from flower.common.util.util import weighted_average
+from flower.server.strategy.fed_kd import FedKD
 from flwr.common import Context, Scalar
 from flwr.server import ServerAppComponents, ServerConfig
-
-from fl.flower.server.strategy.fed_kd import FedKD
 
 
 class FedKDServer:

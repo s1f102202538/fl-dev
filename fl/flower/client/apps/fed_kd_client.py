@@ -3,17 +3,16 @@
 from typing import Dict, Tuple
 
 import torch
+from flower.common.dataLoader.data_loader import load_data, load_public_data
 from flower.common.models.mini_cnn import MiniCNN
 from flower.common.task.cnn_task import CNNTask
-from flower.common.util.util import base64_to_tensor, tensor_to_base64
+from flower.common.task.distillation import Distillation
+from flower.common.util.util import base64_to_batch_list, batch_list_to_base64
 from flwr.client import NumPyClient
 from flwr.client.client import Client
 from flwr.common import ArrayRecord, Context, RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
-
-from fl.flower.common.dataLoader.data_loader import load_data, load_public_data
-from fl.flower.common.task.distillation import Distillation
 
 
 class FedKDClient(NumPyClient):
@@ -40,27 +39,35 @@ class FedKDClient(NumPyClient):
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
     # Config から学習率と共有ロジットの取得
     lr = float(config["lr"])
-    # ロジットをbase64からテンソルに変換
-    logits = base64_to_tensor(config["avg_logits"])
 
-    # 共有ロジットを使用して知識蒸留を行う
-    distillation = Distillation(
-      studentModel=self.net,
-      train_data=self.public_test_data,
-      soft_target_losses=logits,
-    )
-    # 知識蒸留の実行してモデルを更新
-    self.net = distillation.train_knowledge_distillation(
-      5,
-      learning_rate=0.01,
-      T=2.0,
-      soft_target_loss_weight=0.5,
-      ce_loss_weight=0.5,
-      device=self.device,
-    )
+    # 初回ラウンドでは avg_logits がない場合があるのでチェック
+    if "avg_logits" in config and config["avg_logits"] is not None:
+      # ロジットをbase64からバッチリストに変換
+      logits = base64_to_batch_list(config["avg_logits"])
+
+      # print("Client received logits stats:", [b.mean().item() for b in logits])
+
+      # 共有ロジットを使用して知識蒸留を行う
+      distillation = Distillation(
+        studentModel=self.net,
+        public_data=self.public_test_data,
+        soft_targets=logits,
+      )
+      # 知識蒸留の実行してモデルを更新
+      self.net = distillation.train_knowledge_distillation(
+        2,  # エポック数を戻す
+        learning_rate=0.001,  # 学習率を戻す
+        T=3.0,  # 温度を下げる
+        soft_target_loss_weight=0.5,  # KD lossの重みを上げる
+        ce_loss_weight=0.5,  # CE lossの重みを下げる
+        device=self.device,
+      )
+      print("Knowledge distillation performed with server logits")
+    else:
+      print("No server logits available, skipping knowledge distillation")
 
     # 分類層のパラメータを復元
-    self._load_layer_weights_from_state()
+    # self._load_layer_weights_from_state()
 
     train_loss = CNNTask.train(
       self.net,
@@ -71,43 +78,59 @@ class FedKDClient(NumPyClient):
     )
 
     # 分類層のパラメータを state に保存
-    self._save_layer_weights_to_state()
+    # self._save_layer_weights_to_state()
 
     # 学習済みのモデルで公開データの推論を行いロジットを取得
-    logit = CNNTask.inference(self.net, self.public_test_data, device=self.device)
+    logit_batches = CNNTask.inference(self.net, self.public_test_data, device=self.device)
+
+    # NaN/Infのチェックと修正
+    filtered_logits = []
+    for batch in logit_batches:
+      if torch.isnan(batch).any() or torch.isinf(batch).any():
+        print("WARNING: Client detected NaN/Inf in logits, replacing with zeros")
+        batch = torch.zeros_like(batch)
+      filtered_logits.append(batch)
+
+    print("Client send logits stats:", [b.mean().item() for b in filtered_logits])
 
     return (
       [],  # モデルの集約は行わないため空リストを返す
       len(self.train_loader.dataset),  # type: ignore
       {
         "train_loss": train_loss,
-        "logits": tensor_to_base64(logit.cpu().numpy().tolist()),  # type: ignore
+        "logits": batch_list_to_base64(filtered_logits),  # type: ignore
       },
     )
 
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
     """Evaluate model locally."""
-    # ロジットをbase64からテンソルに変換
-    logits = base64_to_tensor(config["avg_logits"])
+    # # 初回ラウンドでは avg_logits がない場合があるのでチェック
+    # if "avg_logits" in config and config["avg_logits"] is not None:
+    #   # ロジットをbase64からバッチリストに変換
+    #   logits = base64_to_batch_list(config["avg_logits"])
 
-    # 知識蒸留を行う
-    distillation = Distillation(
-      studentModel=self.net,
-      train_data=self.public_test_data,
-      soft_target_losses=logits,
-    )
-    self.net = distillation.train_knowledge_distillation(
-      5,
-      learning_rate=0.01,
-      T=2.0,
-      soft_target_loss_weight=0.5,
-      ce_loss_weight=0.5,
-      device=self.device,
-    )
+    #   # 知識蒸留を行う
+    #   distillation = Distillation(
+    #     studentModel=self.net,
+    #     public_data=self.public_test_data,
+    #     soft_targets=logits,
+    #   )
+    #   # 知識蒸留の実行してモデルを更新
+    #   self.net = distillation.train_knowledge_distillation(
+    #     2,
+    #     learning_rate=0.001,
+    #     T=3.0,
+    #     soft_target_loss_weight=0.3,
+    #     ce_loss_weight=0.7,
+    #     device=self.device,
+    #   )
+    #   print("Lightweight knowledge distillation performed with server logits in evaluate")
+    # else:
+    #   print("No server logits available for evaluation, skipping knowledge distillation")
 
-    # Override weights in classification layer with those this client
-    # had at the end of the last fit() round it participated in
-    self._load_layer_weights_from_state()
+    # # Override weights in classification layer with those this client
+    # # had at the end of the last fit() round it participated in
+    # self._load_layer_weights_from_state()
 
     loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
 
@@ -137,7 +160,7 @@ class FedKDClient(NumPyClient):
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     train_loader, val_loader = load_data(partition_id, num_partitions)
-    public_test_data = load_public_data(batch_size=32)
+    public_test_data = load_public_data(batch_size=32, max_samples=2000)  # サンプル数を増加
     local_epochs = context.run_config["local-epochs"]
 
     # Return Client instance
