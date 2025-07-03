@@ -1,9 +1,11 @@
 from typing import Any, Dict, Tuple
 
+from datasets import load_dataset
 from flwr.common.typing import UserConfigValue
 from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import DirichletPartitioner
-from torch.utils.data import DataLoader
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset
 from torchvision.transforms import (
   Compose,
   Normalize,
@@ -11,6 +13,32 @@ from torchvision.transforms import (
   RandomHorizontalFlip,
   ToTensor,
 )
+
+
+class PublicDataset(Dataset):
+  """PyTorch Dataset wrapper for public dataset with transforms."""
+
+  def __init__(self, hf_dataset, transform=None):
+    self.hf_dataset = hf_dataset
+    self.transform = transform
+
+  def __len__(self):
+    return len(self.hf_dataset)
+
+  def __getitem__(self, idx):
+    item = self.hf_dataset[idx]
+    image = item["image"]
+    label = item["label"]
+
+    # Convert to PIL Image if needed
+    if not isinstance(image, Image.Image):
+      image = Image.fromarray(image)
+
+    if self.transform:
+      image = self.transform(image)
+
+    return {"image": image, "label": label}
+
 
 fds = None  # Cache FederatedDataset
 
@@ -51,6 +79,20 @@ def load_data(partition_id: UserConfigValue, num_partitions: UserConfigValue) ->
   train_loader = DataLoader(train_partition, batch_size=32, shuffle=True)  # type: ignore
   test_loader = DataLoader(test_partition, batch_size=32)  # type: ignore
   return train_loader, test_loader
+
+
+def load_public_data(batch_size: int = 32) -> DataLoader:
+  """Load public FashionMNIST test data that is common to all clients."""
+  # Load the test split of FashionMNIST dataset
+  public_dataset = load_dataset("zalando-datasets/fashion_mnist", split="test")
+
+  # Create a PyTorch Dataset wrapper with transforms
+  public_dataset_wrapped = PublicDataset(public_dataset, transform=EVAL_TRANSFORMS)
+
+  # Create DataLoader for public data
+  public_loader = DataLoader(public_dataset_wrapped, batch_size=batch_size, shuffle=False)
+
+  return public_loader
 
 
 def apply_train_transforms(batch: Dict[str, Any]) -> Dict[str, Any]:

@@ -10,7 +10,7 @@ from flwr.server.strategy import Strategy
 from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor, stack, tensor
 
-from fl.flower.common.util.util import create_run_dir, tensor_to_base64
+from fl.flower.common.util.util import base64_to_tensor, create_run_dir, tensor_to_base64
 
 
 class FedKD(Strategy):
@@ -152,7 +152,7 @@ class FedKD(Strategy):
     logits_list = []
     for _, fit_res in results:
       if "logits" in fit_res.metrics:
-        logits_tensor = tensor(fit_res.metrics["logits"])
+        logits_tensor = base64_to_tensor(str(fit_res.metrics["logits"]))
         logits_list.append(logits_tensor)
 
     if logits_list:
