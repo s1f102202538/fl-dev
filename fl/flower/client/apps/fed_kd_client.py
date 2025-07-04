@@ -55,11 +55,11 @@ class FedKDClient(NumPyClient):
       )
       # 知識蒸留の実行してモデルを更新
       self.net = distillation.train_knowledge_distillation(
-        2,  # エポック数を戻す
-        learning_rate=0.001,  # 学習率を戻す
-        T=3.0,  # 温度を下げる
-        soft_target_loss_weight=0.5,  # KD lossの重みを上げる
-        ce_loss_weight=0.5,  # CE lossの重みを下げる
+        1,
+        learning_rate=0.001,
+        T=3.0,
+        soft_target_loss_weight=0.3,
+        ce_loss_weight=0.7,
         device=self.device,
       )
       print("Knowledge distillation performed with server logits")
@@ -160,7 +160,7 @@ class FedKDClient(NumPyClient):
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     train_loader, val_loader = load_data(partition_id, num_partitions)
-    public_test_data = load_public_data(batch_size=32, max_samples=2000)  # サンプル数を増加
+    public_test_data = load_public_data(batch_size=32, max_samples=500)
     local_epochs = context.run_config["local-epochs"]
 
     # Return Client instance
