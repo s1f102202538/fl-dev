@@ -10,13 +10,15 @@ class FedKDServer:
   @staticmethod
   def on_fit_config(server_round: int) -> Dict[str, Scalar]:
     """Construct `config` that clients receive when running `fit()`"""
-    # 学習率スケジューリング
-    if server_round <= 3:
-      lr = 0.01  # 初期は適度な学習率
-    elif server_round <= 7:
-      lr = 0.005  # 中期は段階的に減少
+    # より段階的な学習率スケジューリング
+    if server_round <= 2:
+      lr = 0.02  # 初期は高めの学習率でモデルの表現能力を活用
+    elif server_round <= 5:
+      lr = 0.01  # 中期は標準的な学習率
+    elif server_round <= 8:
+      lr = 0.005  # 後期は細かな調整
     else:
-      lr = 0.001  # 後期は細かな調整
+      lr = 0.002  # 最終期は非常に細かな調整
     return {"lr": lr}
 
   @staticmethod
@@ -34,9 +36,9 @@ class FedKDServer:
       fraction_evaluate=float(fraction_eval),
       on_fit_config_fn=FedKDServer.on_fit_config,
       evaluate_metrics_aggregation_fn=weighted_average,
-      logit_temperature=3.5,  # 初期温度
+      logit_temperature=4.0,  # 初期温度
       enable_adaptive_temperature=True,
-      entropy_threshold=0.3,  # 品質閾値
+      entropy_threshold=0.2,  # 品質閾値で多くのロジットを活用
       max_history_rounds=2,  # 履歴数
     )
     config = ServerConfig(num_rounds=num_rounds)
