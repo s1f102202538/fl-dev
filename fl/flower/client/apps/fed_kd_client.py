@@ -33,7 +33,7 @@ class FedKDClient(NumPyClient):
     self.local_epochs: int = int(local_epochs)
     self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     self.net.to(self.device)
-    self.local_layer_name = "classification-head"
+    self.local_model_name = "full-model"
     self.public_test_data = public_test_data
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
@@ -45,7 +45,8 @@ class FedKDClient(NumPyClient):
       # ロジットをbase64からバッチリストに変換
       logits = base64_to_batch_list(config["avg_logits"])
 
-      # print("Client received logits stats:", [b.mean().item() for b in logits])
+      # サーバーから送信された温度パラメータを取得（デフォルトは3.0）
+      temperature = float(config.get("temperature", 3.0))
 
       # 共有ロジットを使用して知識蒸留を行う
       distillation = Distillation(
@@ -53,21 +54,21 @@ class FedKDClient(NumPyClient):
         public_data=self.public_test_data,
         soft_targets=logits,
       )
-      # 知識蒸留の実行してモデルを更新
+      # 知識蒸留の実行してモデルを更新（動的温度を使用）
       self.net = distillation.train_knowledge_distillation(
-        1,
-        learning_rate=0.001,
-        T=3.0,
-        soft_target_loss_weight=0.3,
-        ce_loss_weight=0.7,
+        epochs=2,  # 蒸留エポック数を増加
+        learning_rate=0.005,  # 蒸留用学習率を増加
+        T=temperature,  # サーバーから受信した温度を使用
+        soft_target_loss_weight=0.5,  # 蒸留損失の重みを増加
+        ce_loss_weight=0.5,
         device=self.device,
       )
-      print("Knowledge distillation performed with server logits")
+      print(f"Knowledge distillation performed with server logits (temperature: {temperature:.3f})")
+
+      # 蒸留後のモデル状態を保存
+      self._save_model_weights_to_state()
     else:
       print("No server logits available, skipping knowledge distillation")
-
-    # 分類層のパラメータを復元
-    # self._load_layer_weights_from_state()
 
     train_loss = CNNTask.train(
       self.net,
@@ -77,8 +78,8 @@ class FedKDClient(NumPyClient):
       device=self.device,
     )
 
-    # 分類層のパラメータを state に保存
-    # self._save_layer_weights_to_state()
+    # モデル全体のパラメータを state に保存
+    self._save_model_weights_to_state()
 
     # 学習済みのモデルで公開データの推論を行いロジットを取得
     logit_batches = CNNTask.inference(self.net, self.public_test_data, device=self.device)
@@ -92,6 +93,7 @@ class FedKDClient(NumPyClient):
       filtered_logits.append(batch)
 
     print("Client send logits stats:", [b.mean().item() for b in filtered_logits])
+    print(f"Client training loss: {train_loss:.4f}")
 
     return (
       [],  # モデルの集約は行わないため空リストを返す
@@ -128,30 +130,33 @@ class FedKDClient(NumPyClient):
     # else:
     #   print("No server logits available for evaluation, skipping knowledge distillation")
 
-    # # Override weights in classification layer with those this client
+    # # Override weights in model with those this client
     # # had at the end of the last fit() round it participated in
-    # self._load_layer_weights_from_state()
+    # self._load_model_weights_from_state()
+
+    # モデルをロードする
+    self._load_model_weights_from_state()
 
     loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
 
     return loss, len(self.val_loader.dataset), {"accuracy": accuracy}  # type: ignore
 
-  def _save_layer_weights_to_state(self) -> None:
-    """Save last layer weights to state."""
-    arr_record = ArrayRecord(self.net.fc2.state_dict())  # type: ignore
+  def _save_model_weights_to_state(self) -> None:
+    """Save entire model weights to state."""
+    arr_record = ArrayRecord(self.net.state_dict())  # type: ignore
 
     # Add to RecordDict (replace if already exists)
-    self.client_state[self.local_layer_name] = arr_record
+    self.client_state[self.local_model_name] = arr_record
 
-  def _load_layer_weights_from_state(self) -> None:
-    """Load last layer weights to state."""
-    if self.local_layer_name not in self.client_state.array_records:
+  def _load_model_weights_from_state(self) -> None:
+    """Load entire model weights from state."""
+    if self.local_model_name not in self.client_state.array_records:
       return
 
-    state_dict = self.client_state[self.local_layer_name].to_torch_state_dict()  # type: ignore
+    state_dict = self.client_state[self.local_model_name].to_torch_state_dict()  # type: ignore
 
-    # apply previously saved classification head by this client
-    self.net.fc2.load_state_dict(state_dict, strict=True)  # type: ignore
+    # apply previously saved model weights by this client
+    self.net.load_state_dict(state_dict, strict=True)  # type: ignore
 
   @staticmethod
   def client_fn(context: Context) -> Client:

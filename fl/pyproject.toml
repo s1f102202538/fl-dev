@@ -28,7 +28,7 @@ clientapp = "flower.client.client_app:app"
 num-server-rounds = 10
 fraction-fit = 1.0
 fraction-evaluate = 1.0
-local-epochs = 1
+local-epochs = 3
 server-device = "cpu"
 use-wandb = true
 

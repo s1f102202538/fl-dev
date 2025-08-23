@@ -30,6 +30,7 @@ class CNNTask:
     net.to(device)
     criterion = nn.CrossEntropyLoss()
     correct, loss = 0, 0.0
+    total_samples = 0
     with torch.no_grad():
       for batch in test_loader:
         images = batch["image"].to(device)
@@ -37,7 +38,9 @@ class CNNTask:
         outputs = net(images)
         loss += criterion(outputs, labels).item()
         correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
-    accuracy = correct / len(test_loader)
+        total_samples += labels.size(0)
+
+    accuracy = (correct / total_samples) * 100.0
     loss = loss / len(test_loader)
     return loss, accuracy
 
