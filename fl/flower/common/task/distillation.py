@@ -87,7 +87,7 @@ class Distillation:
 
           student_logits = self.studentModel(inputs)
 
-          # ロジットのクリッピング（より保守的な値に）
+          # ロジットのクリッピング
           soft_batch_clipped = torch.clamp(soft_batch, min=-20, max=20)
           student_logits_clipped = torch.clamp(student_logits, min=-20, max=20)
 

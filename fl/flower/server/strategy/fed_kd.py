@@ -61,7 +61,6 @@ class FedKD(Strategy):
     self.inplace = inplace
     self.avg_logits: List[Tensor] = []
 
-    # 新しい機能のパラメータ
     self.logit_temperature = logit_temperature
     self.enable_adaptive_temperature = enable_adaptive_temperature
     self.entropy_threshold = entropy_threshold
