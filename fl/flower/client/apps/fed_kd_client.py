@@ -54,12 +54,12 @@ class FedKDClient(NumPyClient):
         public_data=self.public_test_data,
         soft_targets=logits,
       )
-      # 知識蒸留の実行してモデルを更新（動的温度を使用）
+      # 知識蒸留の実行してモデルを更新
       self.net = distillation.train_knowledge_distillation(
-        epochs=2,  # 蒸留エポック数を増加
-        learning_rate=0.005,  # 蒸留用学習率を増加
-        T=temperature,  # サーバーから受信した温度を使用
-        soft_target_loss_weight=0.5,  # 蒸留損失の重みを増加
+        epochs=2,  # 蒸留エポック数
+        learning_rate=0.005,  # 蒸留用学習率
+        T=temperature,  # サーバーから受信した温度
+        soft_target_loss_weight=0.5,  # 蒸留損失の重み
         ce_loss_weight=0.5,
         device=self.device,
       )
