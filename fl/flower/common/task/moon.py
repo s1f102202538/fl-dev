@@ -171,16 +171,16 @@ class MoonContrastiveLearning:
       if len(recent_losses) >= 2:
         loss_trend = recent_losses[-1] - recent_losses[0]
 
-        # 損失が増加している場合はmuを増加（より強い正則化が必要）
-        if loss_trend > 0:
-          self.mu = min(self.max_mu, self.mu * 1.1)
-        else:
-          self.mu = max(self.min_mu, self.mu * 0.95)
+        # より慎重なmu調整（精度低下を防ぐため）
+        if loss_trend > 0.05:  # 閾値を追加して過度な調整を防ぐ
+          self.mu = min(self.max_mu, self.mu * 1.05)  # 調整幅を縮小
+        elif loss_trend < -0.02:
+          self.mu = max(self.min_mu, self.mu * 0.98)  # 調整幅を縮小
 
-    # ラウンドベースの適応
-    if current_round > 10:
-      # 後期ラウンドでは対比学習の重みを徐々に減少
-      decay_factor = 0.99
+    # より緩やかなラウンドベースの適応
+    if current_round > 5:  # 開始ラウンドを早める
+      # 早期から対比学習の重みを徐々に減少
+      decay_factor = 0.995  # より緩やかな減衰
       self.mu = max(self.min_mu, self.mu * decay_factor)
 
   def track_performance(self, train_loss: float, distillation_performed: bool, current_round: int) -> None:
@@ -208,8 +208,8 @@ class MoonContrastiveLearning:
     """
     adaptive_mu = self.mu
     if distillation_performed:
-      # 蒸留実行時は対比学習の重みを削減
-      adaptive_mu *= 0.7
+      # 蒸留実行時は対比学習の重みをより大幅に削減
+      adaptive_mu *= 0.5  # 0.7から0.5に変更
     return adaptive_mu
 
 
