@@ -4,6 +4,12 @@ import copy
 from typing import Dict, Tuple
 
 import torch
+from flwr.client import NumPyClient
+from flwr.client.client import Client
+from flwr.common import Context, RecordDict
+from flwr.common.typing import NDArrays, UserConfigValue
+from torch.utils.data import DataLoader
+
 from flower.common.dataLoader.data_loader import load_data, load_public_data
 from flower.common.models.mini_cnn import MiniCNN
 from flower.common.task.cnn_task import CNNTask
@@ -16,11 +22,6 @@ from flower.common.util.util import (
   load_model_from_state,
   save_model_to_state,
 )
-from flwr.client import NumPyClient
-from flwr.client.client import Client
-from flwr.common import Context, RecordDict
-from flwr.common.typing import NDArrays, UserConfigValue
-from torch.utils.data import DataLoader
 
 
 class FedMoonClient(NumPyClient):
@@ -48,13 +49,13 @@ class FedMoonClient(NumPyClient):
     # モデル状態保存用の名前定義
     self.local_model_name = "fed-moon-model"
 
-    # Moon対比学習の初期化
+    # Moon対比学習の初期化（より控えめなパラメータに調整）
     self.moon_learner = MoonContrastiveLearning(
-      mu=5.0,
+      mu=1.0,  # 初期値を5.0から1.0に減少
       temperature=0.5,
       adaptive_mu=True,
-      min_mu=1.0,
-      max_mu=10.0,
+      min_mu=0.1,  # 最小値を1.0から0.1に減少
+      max_mu=3.0,  # 最大値を10.0から3.0に減少
       device=self.device,
     )
 
@@ -69,6 +70,14 @@ class FedMoonClient(NumPyClient):
     # 設定から学習率を取得
     lr = float(config.get("lr", 0.1))
     current_round = int(config.get("current_round", 0))
+
+    # 前回のローカルモデル状態を復元（訓練開始前に必須）
+    loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
+    if loaded_model is not None:
+      self.net = loaded_model
+      print(f"ローカルモデルを復元しました (ラウンド {current_round})")
+    else:
+      print(f"初回ラウンドまたはモデル状態なし (ラウンド {current_round})")
 
     # ラウンドベースの適応パラメータ更新
     self.moon_learner.update_adaptive_parameters(current_round)
@@ -99,19 +108,15 @@ class FedMoonClient(NumPyClient):
       )
       distillation_performed = True
 
-      # 仮想グローバルモデルでMoon学習器を更新
-      # 前回のローカルモデル状態を復元
-      previous_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
-      if previous_model is not None:
-        # 現在のローカルモデルを基準にMoon学習器を更新
-        self.moon_learner.update_models(previous_model, virtual_global_model)
-      else:
-        print("previous model が見つかりませんでした")
+      # Moon学習器を更新：current_model -> previous, global_model -> virtual_global
+      self.moon_learner.update_models(copy.deepcopy(self.net), virtual_global_model)
+      print("仮想グローバルモデルでMoon学習器を更新しました")
     else:
-      # ロジットが提供されない場合、Moon学習のベースラインとして現在のモデルを使用
+      # ロジットが提供されない場合、初期化のみ実行
       if self.moon_learner.global_model is None:
         current_model_copy = copy.deepcopy(self.net)
         self.moon_learner.update_models(copy.deepcopy(self.net), current_model_copy)
+        print("初期ラウンド: 現在のモデルでMoon学習器を初期化しました")
 
     # 適応対比学習による拡張FedMoon訓練
     train_loss = self.moon_trainer.train_with_enhanced_moon(
