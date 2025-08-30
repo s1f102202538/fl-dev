@@ -1,4 +1,5 @@
 import base64
+import copy
 import io
 import json
 from collections import OrderedDict
@@ -8,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 
 import torch
 import torch.nn as nn
-from flwr.common import Scalar
+from flwr.common import ArrayRecord, RecordDict, Scalar
 from flwr.common.typing import NDArrays, UserConfig
 from torch import Tensor, load, save
 
@@ -59,3 +60,71 @@ def base64_to_batch_list(b64str: str) -> List[Tensor]:
   """Convert base64 string to a list of tensors (batches)."""
   buffer = io.BytesIO(base64.b64decode(b64str))
   return load(buffer)
+
+
+def filter_and_calibrate_logits(logit_batches: List[Tensor], temperature: float = 1.5) -> List[Tensor]:
+  """ロジットの品質フィルタリングと較正処理
+
+  Args:
+      logit_batches: フィルタリング対象のロジットバッチリスト
+      temperature: 温度スケーリングのパラメータ
+
+  Returns:
+      フィルタリング・較正されたロジットバッチリスト
+  """
+  filtered_logits = []
+  for batch in logit_batches:
+    # NaN/Inf値の検出と修正
+    if torch.isnan(batch).any() or torch.isinf(batch).any():
+      print("警告: ロジット内のNaN/Infを検出、ゼロで置換")
+      batch = torch.zeros_like(batch)
+
+    # 温度スケーリングによる較正
+    calibrated_batch = batch / temperature
+
+    # 極値のクリッピング
+    calibrated_batch = torch.clamp(calibrated_batch, min=-10, max=10)
+
+    filtered_logits.append(calibrated_batch)
+
+  return filtered_logits
+
+
+# モデル状態管理用関数
+def save_model_to_state(model: nn.Module, client_state: RecordDict, model_name: str) -> None:
+  """モデルの重みをclient stateに保存
+
+  Args:
+      model: 保存するPyTorchモデル
+      client_state: Flowerのクライアント状態
+      model_name: 状態保存時の識別名
+  """
+  if model is not None:
+    arr_record = ArrayRecord(model.state_dict())  # type: ignore
+    # RecordDictに追加（既に存在する場合は置換）
+    client_state[model_name] = arr_record
+
+
+def load_model_from_state(
+  client_state: RecordDict,
+  reference_model: nn.Module,
+  model_name: str,
+) -> nn.Module | None:
+  """client stateからモデルの重みを読み込み
+
+  Args:
+      client_state: Flowerのクライアント状態
+      reference_model: モデル構造の参照用ベースモデル
+      model_name: 状態保存時の識別名
+
+  Returns:
+      復元されたモデル（復元失敗時はNone）
+  """
+  if model_name not in client_state.array_records:
+    return None
+
+  state_dict = client_state[model_name].to_torch_state_dict()  # type: ignore
+  # 新しいモデルを作成して読み込み
+  new_model = copy.deepcopy(reference_model)
+  new_model.load_state_dict(state_dict, strict=True)  # type: ignore
+  return new_model

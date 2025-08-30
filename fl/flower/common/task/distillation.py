@@ -17,16 +17,45 @@ class Distillation:
 
     # ソフトターゲットがリストかどうかを判定
     self.is_batch_list = isinstance(soft_targets, list) and len(soft_targets) > 0 and isinstance(soft_targets[0], torch.Tensor)
-
     # バッチ数の検証
     if self.is_batch_list:
-      expected_batches = len(self.public_data)
-      actual_batches = len(self.soft_targets)
-      if expected_batches != actual_batches:
-        print(f"Warning: Batch count mismatch. Public data: {expected_batches}, Soft targets: {actual_batches}")
-        # より少ない方に合わせる
-        min_batches = min(expected_batches, actual_batches)
-        print(f"Using first {min_batches} batches for distillation")
+      self._validate_batch_counts()
+
+  def _validate_batch_counts(self) -> None:
+    """バッチ数の検証を行う"""
+    expected_batches = len(self.public_data)
+    actual_batches = len(self.soft_targets)
+    if expected_batches != actual_batches:
+      print(f"Warning: Batch count mismatch. Public data: {expected_batches}, Soft targets: {actual_batches}")
+      # より少ない方に合わせる
+      min_batches = min(expected_batches, actual_batches)
+      print(f"Using first {min_batches} batches for distillation")
+
+  def _validate_and_combine_losses(
+    self, distillation_loss: torch.Tensor, student_loss: torch.Tensor, soft_target_loss_weight: float, ce_loss_weight: float
+  ) -> torch.Tensor:
+    """損失の検証と結合を行う
+
+    Args:
+        distillation_loss: 蒸留損失
+        student_loss: クロスエントロピー損失
+        soft_target_loss_weight: 蒸留損失の重み
+        ce_loss_weight: CE損失の重み
+
+    Returns:
+        結合された損失（無効な場合はNone）
+    """
+    # NaN/Inf の確認と処理
+    if torch.isnan(distillation_loss) or torch.isinf(distillation_loss):
+      print("Warning: Invalid distillation loss detected, using only CE loss")
+      loss = student_loss
+    elif torch.isnan(student_loss) or torch.isinf(student_loss):
+      print("Warning: Invalid student loss detected, using only distillation loss")
+      loss = distillation_loss
+    else:
+      loss = soft_target_loss_weight * distillation_loss + ce_loss_weight * student_loss
+
+    return loss
 
   def train_knowledge_distillation(
     self, epochs: int, learning_rate: float, T: float, soft_target_loss_weight: float, ce_loss_weight: float, device: torch.device
@@ -74,15 +103,6 @@ class Distillation:
 
           soft_batch = self.soft_targets[batch_idx]
 
-          # バッチサイズの確認
-          if inputs.size(0) != soft_batch.size(0):
-            print(f"Warning: Batch size mismatch. Input: {inputs.size(0)}, Soft targets: {soft_batch.size(0)}")
-            # より小さいバッチサイズに合わせる
-            min_batch_size = min(inputs.size(0), soft_batch.size(0))
-            inputs = inputs[:min_batch_size]
-            labels = labels[:min_batch_size]
-            soft_batch = soft_batch[:min_batch_size]
-
           optimizer.zero_grad()
 
           student_logits = self.studentModel(inputs)
@@ -103,21 +123,7 @@ class Distillation:
           distillation_loss = kl_loss(soft_prob, soft_targets_temp) * (T**2)
           student_loss = ce_loss(student_logits, labels)
 
-          # NaN/Inf の確認と処理
-          if torch.isnan(distillation_loss) or torch.isinf(distillation_loss):
-            print("Warning: Invalid distillation loss detected, using only CE loss")
-            loss = student_loss
-          elif torch.isnan(student_loss) or torch.isinf(student_loss):
-            print("Warning: Invalid student loss detected, using only distillation loss")
-            loss = distillation_loss
-          else:
-            loss = soft_target_loss_weight * distillation_loss + ce_loss_weight * student_loss
-
-          # 最終的な損失の検証
-          if torch.isnan(loss) or torch.isinf(loss):
-            print("Warning: Final loss is invalid, skipping this batch")
-            continue
-
+          loss = self._validate_and_combine_losses(distillation_loss, student_loss, soft_target_loss_weight, ce_loss_weight)
           # 損失を逆伝搬
           loss.backward()
 

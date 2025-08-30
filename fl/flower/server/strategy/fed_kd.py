@@ -263,6 +263,9 @@ class FedKD(Strategy):
 
     config = self.on_fit_config_fn(server_round) if self.on_fit_config_fn else {}
 
+    # 現在のラウンド情報を追加
+    config["current_round"] = server_round
+
     # 強化されたロジットを取得（履歴を考慮）
     enhanced_logits = self._get_enhanced_logits()
 
@@ -367,6 +370,10 @@ class FedKD(Strategy):
 
     # 評価用の設定を作成
     config = {}
+
+    # 現在のラウンド情報を追加
+    config["current_round"] = server_round
+
     # 前回のラウンドで集約されたロジットがある場合のみ追加
     if self.avg_logits:
       config["avg_logits"] = batch_list_to_base64(self.avg_logits)

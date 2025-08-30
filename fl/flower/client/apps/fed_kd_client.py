@@ -7,10 +7,16 @@ from flower.common.dataLoader.data_loader import load_data, load_public_data
 from flower.common.models.mini_cnn import MiniCNN
 from flower.common.task.cnn_task import CNNTask
 from flower.common.task.distillation import Distillation
-from flower.common.util.util import base64_to_batch_list, batch_list_to_base64
+from flower.common.util.util import (
+  base64_to_batch_list,
+  batch_list_to_base64,
+  filter_and_calibrate_logits,
+  load_model_from_state,
+  save_model_to_state,
+)
 from flwr.client import NumPyClient
 from flwr.client.client import Client
-from flwr.common import ArrayRecord, Context, RecordDict
+from flwr.common import Context, RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
@@ -66,7 +72,7 @@ class FedKDClient(NumPyClient):
       print(f"Knowledge distillation performed with server logits (temperature: {temperature:.3f})")
 
       # 蒸留後のモデル状態を保存
-      self._save_model_weights_to_state()
+      save_model_to_state(self.net, self.client_state, self.local_model_name)
     else:
       print("No server logits available, skipping knowledge distillation")
 
@@ -79,18 +85,13 @@ class FedKDClient(NumPyClient):
     )
 
     # モデル全体のパラメータを state に保存
-    self._save_model_weights_to_state()
+    save_model_to_state(self.net, self.client_state, self.local_model_name)
 
     # 学習済みのモデルで公開データの推論を行いロジットを取得
-    logit_batches = CNNTask.inference(self.net, self.public_test_data, device=self.device)
+    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
 
-    # NaN/Infのチェックと修正
-    filtered_logits = []
-    for batch in logit_batches:
-      if torch.isnan(batch).any() or torch.isinf(batch).any():
-        print("WARNING: Client detected NaN/Inf in logits, replacing with zeros")
-        batch = torch.zeros_like(batch)
-      filtered_logits.append(batch)
+    # ロジットのフィルタリングと較正処理
+    filtered_logits = filter_and_calibrate_logits(raw_logits, temperature=1.5)
 
     print("Client send logits stats:", [b.mean().item() for b in filtered_logits])
     print(f"Client training loss: {train_loss:.4f}")
@@ -135,28 +136,15 @@ class FedKDClient(NumPyClient):
     # self._load_model_weights_from_state()
 
     # モデルをロードする
-    self._load_model_weights_from_state()
+    loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
+    if loaded_model is not None:
+      self.net = loaded_model
+    else:
+      print("警告: 保存されたモデル状態が見つからないため、初期状態のモデルを使用します")
 
     loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
 
     return loss, len(self.val_loader.dataset), {"accuracy": accuracy}  # type: ignore
-
-  def _save_model_weights_to_state(self) -> None:
-    """Save entire model weights to state."""
-    arr_record = ArrayRecord(self.net.state_dict())  # type: ignore
-
-    # Add to RecordDict (replace if already exists)
-    self.client_state[self.local_model_name] = arr_record
-
-  def _load_model_weights_from_state(self) -> None:
-    """Load entire model weights from state."""
-    if self.local_model_name not in self.client_state.array_records:
-      return
-
-    state_dict = self.client_state[self.local_model_name].to_torch_state_dict()  # type: ignore
-
-    # apply previously saved model weights by this client
-    self.net.load_state_dict(state_dict, strict=True)  # type: ignore
 
   @staticmethod
   def client_fn(context: Context) -> Client:
