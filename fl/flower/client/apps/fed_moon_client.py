@@ -71,7 +71,7 @@ class FedMoonClient(NumPyClient):
     lr = float(config.get("lr", 0.1))
     current_round = int(config.get("current_round", 0))
 
-    # 前回のローカルモデル状態を復元（訓練開始前に必須）
+    # 前回のローカルモデル状態を復元
     loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     if loaded_model is not None:
       self.net = loaded_model
@@ -99,7 +99,7 @@ class FedMoonClient(NumPyClient):
 
       # 蒸留により仮想グローバルモデルを作成
       virtual_global_model = distillation.train_knowledge_distillation(
-        epochs=2,  # 蒸留のエポック数
+        epochs=1,  # 蒸留のエポック数
         learning_rate=0.001,
         T=temperature,
         soft_target_loss_weight=0.4,
@@ -108,7 +108,7 @@ class FedMoonClient(NumPyClient):
       )
       distillation_performed = True
 
-      # Moon学習器を更新：current_model -> previous, global_model -> virtual_global
+      # Moon学習器を更新
       self.moon_learner.update_models(copy.deepcopy(self.net), virtual_global_model)
       print("仮想グローバルモデルでMoon学習器を更新しました")
     else:
@@ -187,7 +187,7 @@ class FedMoonClient(NumPyClient):
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     train_loader, val_loader = load_data(partition_id, num_partitions)
-    public_test_data = load_public_data(batch_size=32, max_samples=500)
+    public_test_data = load_public_data(batch_size=32, max_samples=1000)
     local_epochs = context.run_config["local-epochs"]
 
     # クライアント状態の作成

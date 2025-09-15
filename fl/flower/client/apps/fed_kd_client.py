@@ -3,6 +3,12 @@
 from typing import Dict, Tuple
 
 import torch
+from flwr.client import NumPyClient
+from flwr.client.client import Client
+from flwr.common import Context, RecordDict
+from flwr.common.typing import NDArrays, UserConfigValue
+from torch.utils.data import DataLoader
+
 from flower.common.dataLoader.data_loader import load_data, load_public_data
 from flower.common.models.mini_cnn import MiniCNN
 from flower.common.task.cnn_task import CNNTask
@@ -14,11 +20,6 @@ from flower.common.util.util import (
   load_model_from_state,
   save_model_to_state,
 )
-from flwr.client import NumPyClient
-from flwr.client.client import Client
-from flwr.common import Context, RecordDict
-from flwr.common.typing import NDArrays, UserConfigValue
-from torch.utils.data import DataLoader
 
 
 class FedKDClient(NumPyClient):
@@ -43,6 +44,14 @@ class FedKDClient(NumPyClient):
     self.public_test_data = public_test_data
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
+    # 前のラウンドで保存されたモデルを self.net にロードする
+    loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
+    if loaded_model is not None:
+      self.net = loaded_model
+      print("[DEBUG] Previous round model loaded successfully")
+    else:
+      print("[DEBUG] No previous model found, using initial model")
+
     # Config から学習率と共有ロジットの取得
     lr = float(config["lr"])
 
@@ -89,9 +98,11 @@ class FedKDClient(NumPyClient):
 
     # 学習済みのモデルで公開データの推論を行いロジットを取得
     raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
+    print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
 
     # ロジットのフィルタリングと較正処理
     filtered_logits = filter_and_calibrate_logits(raw_logits, temperature=1.5)
+    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches")
 
     print("Client send logits stats:", [b.mean().item() for b in filtered_logits])
     print(f"Client training loss: {train_loss:.4f}")
@@ -139,6 +150,7 @@ class FedKDClient(NumPyClient):
     loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     if loaded_model is not None:
       self.net = loaded_model
+      print("[DEBUG] Model loaded successfully for evaluation")
     else:
       print("警告: 保存されたモデル状態が見つからないため、初期状態のモデルを使用します")
 
