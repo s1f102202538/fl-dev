@@ -92,6 +92,10 @@ def load_public_data(batch_size: int = 32, max_samples: int = 1000) -> DataLoade
   # Create DataLoader for public data
   public_loader = DataLoader(public_dataset_wrapped, batch_size=batch_size, shuffle=False)
 
+  dataset_size = len(public_dataset_wrapped)
+  expected_batches = dataset_size // batch_size + (1 if dataset_size % batch_size > 0 else 0)
+  print(f"[DEBUG] Public data: {dataset_size} samples, batch_size={batch_size}, expected_batches={expected_batches}")
+
   return public_loader
 
 
