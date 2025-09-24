@@ -3,7 +3,6 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
 import torch
 import torch.nn.functional as F
-from flower.common.util.util import base64_to_batch_list, batch_list_to_base64, create_run_dir
 from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, NDArrays, Parameters, Scalar
 from flwr.common.logger import log
 from flwr.common.typing import UserConfig
@@ -12,6 +11,8 @@ from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import Strategy
 from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor
+
+from flower.common.util.util import base64_to_batch_list, batch_list_to_base64, create_run_dir
 
 
 class FedKD(Strategy):
@@ -42,6 +43,7 @@ class FedKD(Strategy):
     use_wandb: bool = False,
     # 新しいパラメータ
     logit_temperature: float = 3.0,
+    kd_temperature: float = 3.0,
     enable_adaptive_temperature: bool = True,
     entropy_threshold: float = 0.5,
     max_history_rounds: int = 3,
@@ -68,7 +70,7 @@ class FedKD(Strategy):
 
     # ロジット履歴とメトリクス
     self.logit_history: List[List[Tensor]] = []
-    self.current_temperature = logit_temperature
+    self.kd_temperature = kd_temperature
     self.round_metrics = []
 
     self.save_path, self.run_dir = create_run_dir(run_config)
@@ -78,7 +80,7 @@ class FedKD(Strategy):
     """ロジットの品質を評価する"""
     with torch.no_grad():
       # ソフトマックス確率を計算
-      probs = F.softmax(logits / self.current_temperature, dim=1)
+      probs = F.softmax(logits / self.logit_temperature, dim=1)
 
       # エントロピーを計算（不確実性の指標）
       entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1).mean().item()
@@ -164,41 +166,6 @@ class FedKD(Strategy):
 
     return aggregated_batches
 
-  def _update_temperature(self, server_round: int, logits: List[Tensor]) -> None:
-    """動的温度調整"""
-    if not self.enable_adaptive_temperature or not logits:
-      return
-
-    # 現在のロジットの品質を評価
-    all_logits = torch.cat(logits, dim=0)
-    quality = self._evaluate_logit_quality(all_logits)
-
-    # より効果的な温度調整戦略
-    # 初期ラウンドでは高い温度（ソフト）、中期で適度、後期で低い温度（ハード）
-    initial_temp = self.logit_temperature
-    mid_temp = self.logit_temperature * 0.8
-    final_temp = self.logit_temperature * 0.6
-
-    if server_round <= 3:
-      # 初期段階：高い温度でソフトな知識伝達
-      base_temp = initial_temp
-    elif server_round <= 7:
-      # 中期段階：段階的に温度を下げる
-      progress = (server_round - 3) / 4.0
-      base_temp = initial_temp - (initial_temp - mid_temp) * progress
-    else:
-      # 後期段階：低い温度でハードな知識伝達
-      progress = min((server_round - 7) / 3.0, 1.0)
-      base_temp = mid_temp - (mid_temp - final_temp) * progress
-
-    # エントロピーベースの微調整（より控えめに）
-    entropy_factor = min(quality["entropy"] / 2.5, 1.0)
-    adjusted_temp = base_temp * (1.0 + 0.3 * entropy_factor)
-
-    self.current_temperature = max(adjusted_temp, 1.5)  # 最小温度を1.5に
-
-    print(f"[FedKD] Round {server_round}: Updated temperature to {self.current_temperature:.3f} (base: {base_temp:.3f}, entropy: {quality['entropy']:.3f})")
-
   def _manage_logit_history(self, new_logits: List[Tensor]) -> None:
     """ロジット履歴の管理"""
     if new_logits:
@@ -273,8 +240,8 @@ class FedKD(Strategy):
     if enhanced_logits:
       config["avg_logits"] = batch_list_to_base64(enhanced_logits)
       # 現在の温度をクライアントに送信
-      config["temperature"] = self.current_temperature
-      print(f"[FedKD] Sending {len(enhanced_logits)} enhanced logit batches to clients (temp: {self.current_temperature:.3f})")
+      config["temperature"] = self.kd_temperature
+      print(f"[FedKD] Sending {len(enhanced_logits)} enhanced logit batches to clients (temp: {self.kd_temperature:.3f})")
     else:
       print("[FedKD] No logits available for this round")
 
@@ -322,9 +289,6 @@ class FedKD(Strategy):
       # 重み付きロジット集約を実行
       self.avg_logits = self._weighted_logit_aggregation(logits_batch_lists, client_weights)
 
-      # 温度を動的に調整
-      self._update_temperature(server_round, self.avg_logits)
-
       # ロジット履歴を管理
       self._manage_logit_history(self.avg_logits)
 
@@ -339,7 +303,7 @@ class FedKD(Strategy):
       aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
 
     # 現在の温度をメトリクスに追加
-    aggregated_metrics["current_temperature"] = self.current_temperature
+    aggregated_metrics["current_temperature"] = self.kd_temperature
     if self.avg_logits:
       aggregated_metrics["num_aggregated_batches"] = len(self.avg_logits)
 

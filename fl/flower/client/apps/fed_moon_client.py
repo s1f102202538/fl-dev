@@ -49,13 +49,12 @@ class FedMoonClient(NumPyClient):
     # モデル状態保存用の名前定義
     self.local_model_name = "fed-moon-model"
 
-    # Moon対比学習の初期化（より控えめなパラメータに調整）
+    # Moon対比学習の初期化（論文推奨値に基づく設定）
     self.moon_learner = MoonContrastiveLearning(
-      mu=1.0,  # 初期値を5.0から1.0に減少
+      mu=1.0,
       temperature=0.5,
-      adaptive_mu=True,
-      min_mu=0.1,  # 最小値を1.0から0.1に減少
-      max_mu=3.0,  # 最大値を10.0から3.0に減少
+      min_mu=1.0,
+      max_mu=10.0,
       device=self.device,
     )
 
@@ -79,11 +78,6 @@ class FedMoonClient(NumPyClient):
     else:
       print(f"初回ラウンドまたはモデル状態なし (ラウンド {current_round})")
 
-    # ラウンドベースの適応パラメータ更新
-    self.moon_learner.update_adaptive_parameters(current_round)
-
-    # 共有ロジットによる拡張知識蒸留（仮想グローバルモデルの作成）
-    distillation_performed = False
     virtual_global_model = None
 
     if "avg_logits" in config and config["avg_logits"] is not None:
@@ -99,32 +93,36 @@ class FedMoonClient(NumPyClient):
 
       # 蒸留により仮想グローバルモデルを作成
       virtual_global_model = distillation.train_knowledge_distillation(
-        epochs=1,  # 蒸留のエポック数
+        epochs=1,  # FedKDと同等に設定
         learning_rate=0.001,
         T=temperature,
         soft_target_loss_weight=0.4,
         ce_loss_weight=0.6,
         device=self.device,
       )
-      distillation_performed = True
 
-      # Moon学習器を更新
+      # Moon学習器を更新: previous_model -> 現在のローカルモデル, global_model -> 仮想グローバルモデル
       self.moon_learner.update_models(copy.deepcopy(self.net), virtual_global_model)
       print("仮想グローバルモデルでMoon学習器を更新しました")
     else:
-      # ロジットが提供されない場合、初期化のみ実行
-      if self.moon_learner.global_model is None:
-        current_model_copy = copy.deepcopy(self.net)
-        self.moon_learner.update_models(copy.deepcopy(self.net), current_model_copy)
-        print("初期ラウンド: 現在のモデルでMoon学習器を初期化しました")
+      # 第1ラウンドでは対比学習を無効化（グローバルモデルとローカルモデルが同一のため）
+      if current_round == 1:
+        print("第1ラウンド: 対比学習をスキップ（グローバルモデル未確立）")
+        # global_modelをNoneのままにして対比学習を無効化
+      else:
+        # 2ラウンド目以降で初期化が必要な場合のみ実行
+        if self.moon_learner.global_model is None:
+          current_model_copy = copy.deepcopy(self.net)
+          self.moon_learner.update_models(copy.deepcopy(self.net), current_model_copy)
+          print("遅延初期化: 現在のモデルでMoon学習器を初期化しました")
 
     # 適応対比学習による拡張FedMoon訓練
     train_loss = self.moon_trainer.train_with_enhanced_moon(
       model=self.net,
       train_loader=self.train_loader,
       lr=lr,
-      local_epochs=self.local_epochs,
-      distillation_performed=distillation_performed,
+      epochs=5,
+      current_round=current_round,
     )
 
     # 共有用の高品質ロジット生成
@@ -132,7 +130,7 @@ class FedMoonClient(NumPyClient):
     logit_batches = filter_and_calibrate_logits(raw_logits, temperature=1.5)
 
     # 適応学習のための性能追跡
-    self.moon_learner.track_performance(train_loss, distillation_performed, current_round)
+    self.moon_learner.track_performance(train_loss, current_round)
 
     # 学習完了後のローカルモデル状態を保存
     save_model_to_state(self.net, self.client_state, self.local_model_name)
@@ -146,7 +144,6 @@ class FedMoonClient(NumPyClient):
       {
         "train_loss": train_loss,
         "logits": batch_list_to_base64(logit_batches),
-        "distillation_performed": distillation_performed,
         "current_mu": self.moon_learner.mu,
       },
     )
