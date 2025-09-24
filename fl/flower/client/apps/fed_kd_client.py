@@ -71,7 +71,7 @@ class FedKDClient(NumPyClient):
       )
       # 知識蒸留の実行してモデルを更新
       self.net = distillation.train_knowledge_distillation(
-        epochs=1,  # 蒸留エポック数を1に
+        epochs=1,  # 蒸留エポック数を1
         learning_rate=0.001,  # 蒸留用学習率
         T=temperature,  # サーバーから受信した温度
         soft_target_loss_weight=0.4,  # 蒸留損失の重み

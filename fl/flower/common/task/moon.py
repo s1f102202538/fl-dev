@@ -1,5 +1,3 @@
-"""対比学習のためのFedMoonアルゴリズム実装"""
-
 import copy
 from typing import Tuple
 
@@ -9,13 +7,12 @@ from torch import nn
 
 
 class MoonContrastiveLearning:
-  """FedMoon対比学習実装"""
+  """FedMoon対比学習"""
 
   def __init__(
     self,
     mu: float = 5.0,
     temperature: float = 0.5,
-    adaptive_mu: bool = True,
     min_mu: float = 1.0,
     max_mu: float = 10.0,
     device: torch.device | None = None,
@@ -25,14 +22,12 @@ class MoonContrastiveLearning:
     Args:
         mu: 対比損失の重み
         temperature: 対比損失の温度
-        adaptive_mu: 適応的muを使用するかどうか
         min_mu: muの最小値
         max_mu: muの最大値
         device: 計算に使用するデバイス
     """
     self.mu = mu
     self.temperature = temperature
-    self.adaptive_mu = adaptive_mu
     self.min_mu = min_mu
     self.max_mu = max_mu
     self.device = device or torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -122,68 +117,45 @@ class MoonContrastiveLearning:
     return contrastive_loss
 
   def compute_enhanced_contrastive_loss(self, local_features: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
-    """数値安定性を向上させた拡張対比損失
+    """対比損失計算
 
     Args:
         local_features: ローカルモデルからの特徴量
         images: 入力画像
 
     Returns:
-        拡張対比損失テンソル
+        対比損失テンソル
     """
     if self.global_model is None or self.previous_model is None:
       return torch.tensor(0.0, device=self.device, requires_grad=True)
 
     # グローバルモデルと前回モデルから特徴量を取得
-    with torch.no_grad():
-      global_features, _ = self.forward_with_features(self.global_model, images)
+    global_features, _ = self.forward_with_features(self.global_model, images)
+    with torch.no_grad():  # 前回モデルの特徴量のみno_grad
       prev_features, _ = self.forward_with_features(self.previous_model, images)
 
-    # 数値安定性を考慮した拡張正規化
-    eps = 1e-8
-    local_features = F.normalize(local_features + eps, dim=1)
-    global_features = F.normalize(global_features + eps, dim=1)
-    prev_features = F.normalize(prev_features + eps, dim=1)
+    # 特徴量を正規化
+    local_features = F.normalize(local_features, dim=1)
+    global_features = F.normalize(global_features, dim=1)
+    prev_features = F.normalize(prev_features, dim=1)
 
-    # 温度スケーリングによる類似度計算
-    pos_sim = torch.sum(local_features * global_features, dim=1) / self.temperature
-    neg_sim = torch.sum(local_features * prev_features, dim=1) / self.temperature
+    # 対比損失: current-global (positive) vs current-previous (negative)
+    pos_sim = torch.sum(local_features * global_features, dim=1) / self.temperature  # 正例: local-global
+    neg_sim = torch.sum(local_features * prev_features, dim=1) / self.temperature  # 負例: local-previous
 
-    # 数値安定性を考慮した拡張対比損失
+    # 数値安定性のためのクランプ
     pos_sim = torch.clamp(pos_sim, min=-10, max=10)
     neg_sim = torch.clamp(neg_sim, min=-10, max=10)
 
+    # 対比損失: -log(exp(pos) / (exp(pos) + exp(neg)))
+    # これはlocal-globalの類似性を高め、local-previousの類似性を下げる
     logits = torch.stack([pos_sim, neg_sim], dim=1)
     labels = torch.zeros(logits.size(0), dtype=torch.long, device=self.device)
     contrastive_loss = F.cross_entropy(logits, labels)
 
     return contrastive_loss
 
-  def update_adaptive_parameters(self, current_round: int) -> None:
-    """ラウンドと性能履歴に基づく適応パラメータ更新
-
-    Args:
-        current_round: 現在の訓練ラウンド
-    """
-    if self.adaptive_mu and len(self.performance_history) >= 2:
-      # 性能トレンドを計算
-      recent_losses = [h["train_loss"] for h in self.performance_history[-3:]]
-      if len(recent_losses) >= 2:
-        loss_trend = recent_losses[-1] - recent_losses[0]
-
-        # より慎重なmu調整（精度低下を防ぐため）
-        if loss_trend > 0.05:  # 閾値を追加して過度な調整を防ぐ
-          self.mu = min(self.max_mu, self.mu * 1.05)  # 調整幅を縮小
-        elif loss_trend < -0.02:
-          self.mu = max(self.min_mu, self.mu * 0.98)  # 調整幅を縮小
-
-    # より緩やかなラウンドベースの適応
-    if current_round > 5:  # 開始ラウンドを早める
-      # 早期から対比学習の重みを徐々に減少
-      decay_factor = 0.995  # より緩やかな減衰
-      self.mu = max(self.min_mu, self.mu * decay_factor)
-
-  def track_performance(self, train_loss: float, distillation_performed: bool, current_round: int) -> None:
+  def track_performance(self, train_loss: float, current_round: int) -> None:
     """適応学習のための性能追跡
 
     Args:
@@ -191,26 +163,11 @@ class MoonContrastiveLearning:
         distillation_performed: 蒸留が実行されたかどうか
         current_round: 現在の訓練ラウンド
     """
-    self.performance_history.append({"train_loss": train_loss, "distillation_performed": distillation_performed, "round": current_round})
+    self.performance_history.append({"train_loss": train_loss, "round": current_round})
 
     # 最近の履歴のみを保持
     if len(self.performance_history) > self.max_history_length:
       self.performance_history.pop(0)
-
-  def get_adaptive_mu(self, distillation_performed: bool) -> float:
-    """現在の状態に基づく適応mu値を取得
-
-    Args:
-        distillation_performed: 蒸留が実行されたかどうか
-
-    Returns:
-        適応mu値
-    """
-    adaptive_mu = self.mu
-    if distillation_performed:
-      # 蒸留実行時は対比学習の重みをより大幅に削減
-      adaptive_mu *= 0.5  # 0.7から0.5に変更
-    return adaptive_mu
 
 
 class MoonTrainer:
@@ -235,28 +192,34 @@ class MoonTrainer:
     model: nn.Module,
     train_loader,
     lr: float,
-    local_epochs: int,
+    epochs: int,
+    current_round: int = 1,
   ) -> float:
     """FedMoon対比学習による訓練
 
     Args:
         model: ニューラルネットワークモデル
         train_loader: 訓練データローダー
-        lr: 学習率
+        lr: ベース学習率
         local_epochs: ローカルエポック数
+        current_round: 現在のラウンド
+        distillation_performed: 蒸留が実行されたかどうか
 
     Returns:
         平均訓練損失
     """
     model.to(self.device)
     criterion = nn.CrossEntropyLoss().to(self.device)
+
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=1e-5)
+
+    print(f"[MOON] Round {current_round}: Using LR = {lr:.6f} (base={lr:.6f})")
 
     model.train()
     running_loss = 0.0
     total_batches = 0
 
-    for epoch in range(local_epochs):
+    for epoch in range(epochs):
       for batch in train_loader:
         images = batch["image"].to(self.device)
         labels = batch["label"].to(self.device)
@@ -291,16 +254,17 @@ class MoonTrainer:
     model: nn.Module,
     train_loader,
     lr: float,
-    local_epochs: int,
-    distillation_performed: bool = False,
+    epochs: int,
+    current_round: int = 1,
   ) -> float:
     """適応FedMoon対比学習による拡張訓練
 
     Args:
         model: ニューラルネットワークモデル
         train_loader: 訓練データローダー
-        lr: 学習率
+        lr: ベース学習率
         local_epochs: ローカルエポック数
+        current_round: 現在のラウンド
         distillation_performed: 蒸留が実行されたかどうか
 
     Returns:
@@ -309,19 +273,16 @@ class MoonTrainer:
     model.to(self.device)
     criterion = nn.CrossEntropyLoss().to(self.device)
 
-    # 蒸留実行の有無に基づく異なるオプティマイザパラメータ
-    if distillation_performed:
-      # 蒸留後のファインチューニングのため学習率を下げる
-      optimizer = torch.optim.SGD(model.parameters(), lr=lr * 0.7, momentum=0.9, weight_decay=1e-5)
-    else:
-      optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=1e-5)
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=1e-5)
+
+    print(f"[Enhanced MOON] Round {current_round}: Using LR = {lr:.6f} (base={lr:.6f})")
 
     model.train()
     running_loss = 0.0
     total_batches = 0
     contrastive_loss_sum = 0.0
 
-    for epoch in range(local_epochs):
+    for epoch in range(epochs):
       for batch in train_loader:
         images = batch["image"].to(self.device)
         labels = batch["label"].to(self.device)
@@ -339,14 +300,16 @@ class MoonTrainer:
         if self.moon_learner.global_model is not None and self.moon_learner.previous_model is not None:
           contrastive_loss = self.moon_learner.compute_enhanced_contrastive_loss(features, images)
 
-        # 適応総損失
-        adaptive_mu = self.moon_learner.get_adaptive_mu(distillation_performed)
-        total_loss = ce_loss + adaptive_mu * contrastive_loss
+        total_loss = ce_loss + self.moon_learner.mu * contrastive_loss
 
         total_loss.backward()
 
-        # 安定性のためのグラデーションクリッピング
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # # 条件付きグラデーションクリッピング（後半ラウンドで緩和）
+        # if current_round <= 5:
+        #   torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
+        # else:
+        #   # 後半ラウンドではより緩やかなクリッピングまたは無効化
+        #   torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=5.0)
 
         optimizer.step()
 
