@@ -47,7 +47,7 @@ class DataLoaderConfig:
 
   # Partitioner configuration
   partitioner_type: str = "dirichlet"  # "dirichlet" or "iid"
-  alpha: float = 1.0  # For DirichletPartitioner
+  alpha: float = 0.2  # For DirichletPartitioner
   partition_by: str = "label"
   seed: int = 42
 

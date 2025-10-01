@@ -1,9 +1,11 @@
-from logging import WARNING
+import json
+from logging import INFO, WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
 import torch
 import torch.nn.functional as F
-from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, NDArrays, Parameters, Scalar
+import wandb
+from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, Parameters, Scalar
 from flwr.common.logger import log
 from flwr.common.typing import UserConfig
 from flwr.server.client_manager import ClientManager
@@ -14,6 +16,8 @@ from torch import Tensor
 
 from flower.common.util.util import base64_to_batch_list, batch_list_to_base64, create_run_dir
 
+PROJECT_NAME = "fl-dev"
+
 
 class FedKD(Strategy):
   """Federated Knowledge Distillation (FedKD) strategy."""
@@ -23,15 +27,9 @@ class FedKD(Strategy):
     *,
     fraction_fit: float = 1.0,
     fraction_evaluate: float = 1.0,
-    min_fit_clients: int = 2,
-    min_evaluate_clients: int = 2,
-    min_available_clients: int = 2,
-    evaluate_fn: Optional[
-      Callable[
-        [int, NDArrays, dict[str, Scalar]],
-        Optional[tuple[float, dict[str, Scalar]]],
-      ]
-    ] = None,
+    min_fit_clients: int = 5,
+    min_evaluate_clients: int = 5,
+    min_available_clients: int = 5,
     on_fit_config_fn: Optional[Callable[[int], dict[str, Scalar]]] = None,
     on_evaluate_config_fn: Optional[Callable[[int], dict[str, Scalar]]] = None,
     accept_failures: bool = True,
@@ -53,7 +51,6 @@ class FedKD(Strategy):
     self.min_fit_clients = min_fit_clients
     self.min_evaluate_clients = min_evaluate_clients
     self.min_available_clients = min_available_clients
-    self.evaluate_fn = evaluate_fn
     self.on_fit_config_fn = on_fit_config_fn
     self.on_evaluate_config_fn = on_evaluate_config_fn
     self.accept_failures = accept_failures
@@ -75,6 +72,44 @@ class FedKD(Strategy):
 
     self.save_path, self.run_dir = create_run_dir(run_config)
     self.use_wandb = use_wandb
+
+    # Initialise W&B if set
+    if use_wandb:
+      self._init_wandb_project()
+
+    # Keep track of best acc
+    self.best_acc_so_far = 0.0
+
+    # A dictionary to store results as they come
+    self.results: Dict = {}
+
+  def _init_wandb_project(self) -> None:
+    """Initialize W&B project."""
+    wandb.init(project=PROJECT_NAME, name=f"{str(self.run_dir)}-ServerApp-FedKD")
+
+  def _store_results(self, tag: str, results_dict: Dict) -> None:
+    """Store results in dictionary, then save as JSON."""
+    # Update results dict
+    if tag in self.results:
+      self.results[tag].append(results_dict)
+    else:
+      self.results[tag] = [results_dict]
+
+    # Save results to disk
+    with open(f"{self.save_path}/results.json", "w", encoding="utf-8") as fp:
+      json.dump(self.results, fp)
+
+  def store_results_and_log(self, server_round: int, tag: str, results_dict: Dict) -> None:
+    """A helper method that stores results and logs them to W&B if enabled."""
+    # Store results
+    self._store_results(
+      tag=tag,
+      results_dict={"round": server_round, **results_dict},
+    )
+
+    if self.use_wandb:
+      # Log metrics to W&B
+      wandb.log(results_dict, step=server_round)
 
   def _evaluate_logit_quality(self, logits: Tensor) -> Dict[str, float]:
     """ロジットの品質を評価する"""
@@ -399,27 +434,34 @@ class FedKD(Strategy):
     elif server_round == 1:  # Only log this warning once
       log(WARNING, "No evaluate_metrics_aggregation_fn provided")
 
+    # Store and log FedKD evaluation results
+    self.store_results_and_log(
+      server_round=server_round,
+      tag="federated_evaluate",
+      results_dict={"federated_evaluate_loss": loss_aggregated, **metrics_aggregated},
+    )
+
     return loss_aggregated, metrics_aggregated
 
   @override
   def evaluate(self, server_round: int, parameters: Parameters) -> Optional[Tuple[float, Dict[str, Scalar]]]:
     """Evaluate the current model parameters.
 
-    This function can be used to perform centralized (i.e., server-side) evaluation
-    of model parameters.
+    FedKD uses logit-based knowledge distillation instead of parameter aggregation.
+    Server-side centralized evaluation is not applicable for this strategy.
 
     Parameters
     ----------
     server_round : int
         The current round of federated learning.
     parameters: Parameters
-        The current (global) model parameters.
+        The current (global) model parameters (unused in FedKD).
 
     Returns
     -------
     evaluation_result : Optional[Tuple[float, Dict[str, Scalar]]]
-        The evaluation result, usually a Tuple containing loss and a
-        dictionary containing task-specific metrics (e.g., accuracy).
+        Always returns None as FedKD does not perform centralized evaluation.
     """
-
-    # サーバはモデルを持たないため評価は行わない
+    # FedKDはロジットベースの知識蒸留を使用するため、
+    # サーバー側でのパラメータベース評価は行わない
+    return None

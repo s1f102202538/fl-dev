@@ -6,14 +6,15 @@ from typing import Dict, List, Optional, Union
 
 import torch
 import wandb
-from flower.common.models.mini_cnn import MiniCNN
-from flower.common.util.util import create_run_dir, set_weights
 from flwr.common import EvaluateRes, Scalar, logger, parameters_to_ndarrays
 from flwr.common.typing import Parameters, UserConfig
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import FedAvg
 
-PROJECT_NAME = "FLOWER-advanced-pytorch"
+from flower.common.models.mini_cnn import MiniCNN
+from flower.common.util.util import create_run_dir, set_weights
+
+PROJECT_NAME = "fl-dev"
 
 
 class CustomFedAvg(FedAvg):
@@ -41,8 +42,8 @@ class CustomFedAvg(FedAvg):
     self.results: Dict = {}
 
   def _init_wandb_project(self) -> None:
-    # init W&B
-    wandb.init(project=PROJECT_NAME, name=f"{str(self.run_dir)}-ServerApp")
+    """Initialize W&B project."""
+    wandb.init(project=PROJECT_NAME, name=f"{str(self.run_dir)}-ServerApp-FedAvg")
 
   def _store_results(self, tag: str, results_dict: Dict) -> None:
     """Store results in dictionary, then save as JSON."""
@@ -87,7 +88,7 @@ class CustomFedAvg(FedAvg):
     )
 
     if self.use_wandb:
-      # Log centralized loss and metrics to W&B
+      # Log metrics to W&B
       wandb.log(results_dict, step=server_round)
 
   def evaluate(self, server_round: int, parameters: Parameters) -> Optional[tuple[float, dict[str, Scalar]]]:
@@ -97,11 +98,11 @@ class CustomFedAvg(FedAvg):
     # Save model if new best central accuracy is found
     self._update_best_acc(server_round, float(metrics["centralized_accuracy"]), parameters)
 
-    # Store and log
+    # Store and log centralized evaluation results
     self.store_results_and_log(
       server_round=server_round,
-      tag="centralized_evaluate",
-      results_dict={"centralized_loss": loss, **metrics},
+      tag="fedavg_centralized_evaluate",
+      results_dict={"fedavg_centralized_loss": loss, **metrics},
     )
     return loss, metrics
 
@@ -111,7 +112,7 @@ class CustomFedAvg(FedAvg):
     """Aggregate results from federated evaluation."""
     loss, metrics = super().aggregate_evaluate(server_round, results, failures)
 
-    # Store and log
+    # Store and log federated evaluation results
     self.store_results_and_log(
       server_round=server_round,
       tag="federated_evaluate",

@@ -131,7 +131,7 @@ class MoonContrastiveLearning:
 
     # グローバルモデルと前回モデルから特徴量を取得
     global_features, _ = self.forward_with_features(self.global_model, images)
-    with torch.no_grad():  # 前回モデルの特徴量のみno_grad
+    with torch.no_grad():
       prev_features, _ = self.forward_with_features(self.previous_model, images)
 
     # 特徴量を正規化
