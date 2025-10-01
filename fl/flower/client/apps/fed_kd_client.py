@@ -52,9 +52,6 @@ class FedKdClient(NumPyClient):
     else:
       print("[DEBUG] No previous model found, using initial model")
 
-    # Config から学習率と共有ロジットの取得
-    lr = float(config["lr"])
-
     # 初回ラウンドでは avg_logits がない場合があるのでチェック
     if "avg_logits" in config and config["avg_logits"] is not None:
       # ロジットをbase64からバッチリストに変換
@@ -89,7 +86,7 @@ class FedKdClient(NumPyClient):
       self.net,
       self.train_loader,
       self.local_epochs,
-      lr=lr,
+      lr=0.01,
       device=self.device,
     )
 

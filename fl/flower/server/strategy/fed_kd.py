@@ -263,8 +263,7 @@ class FedKD(Strategy):
   def configure_fit(self, server_round: int, parameters: Parameters, client_manager: ClientManager) -> List[Tuple[ClientProxy, FitIns]]:
     """Configure the next round of training with enhanced logits."""
 
-    config = self.on_fit_config_fn(server_round) if self.on_fit_config_fn else {}
-
+    config = {}
     # 現在のラウンド情報を追加
     config["current_round"] = server_round
 

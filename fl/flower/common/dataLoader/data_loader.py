@@ -287,7 +287,9 @@ class FederatedDataLoaderManager:
       return self._create_dual_heatmaps(partitioner_with_data, num_partitions, save_path, quiet)
     else:
       # Create single visualization for bar plots
-      title = f"{self.config.dataset_name.split('/')[-1].upper()} Data Distribution ({size_unit.capitalize()} counts, {plot_type} plot)"
+      dataset_name = self.config.dataset_name.split("/")[-1].upper()
+      alpha_info = f" (α={self.config.alpha})" if self.config.partitioner_type.lower() == "dirichlet" else ""
+      title = f"{dataset_name} Data Distribution{alpha_info} ({size_unit.capitalize()} counts, {plot_type} plot)"
       plot_kwargs = {"annot": True} if plot_type == "heatmap" else {}
 
       fig, ax, df = plot_label_distributions(
@@ -318,6 +320,7 @@ class FederatedDataLoaderManager:
     import matplotlib.pyplot as plt
 
     dataset_name = self.config.dataset_name.split("/")[-1].upper()
+    alpha_info = f" (α={self.config.alpha})" if self.config.partitioner_type.lower() == "dirichlet" else ""
 
     # Create absolute counts heatmap
     fig1, ax1_temp, df_abs = plot_label_distributions(
@@ -328,7 +331,7 @@ class FederatedDataLoaderManager:
       partition_id_axis="x",
       legend=True,
       verbose_labels=True,
-      title=f"{dataset_name} Data Distribution (Absolute counts)",
+      title=f"{dataset_name} Data Distribution{alpha_info} (Absolute counts)",
       cmap="YlOrRd",
       plot_kwargs={"annot": True, "fmt": "d"},
     )
@@ -343,7 +346,7 @@ class FederatedDataLoaderManager:
       partition_id_axis="x",
       legend=True,
       verbose_labels=True,
-      title=f"{dataset_name} Data Distribution (Percentage)",
+      title=f"{dataset_name} Data Distribution{alpha_info} (Percentage)",
       cmap="YlOrRd",
       plot_kwargs={"annot": True, "fmt": ".1f"},
     )
@@ -368,7 +371,7 @@ class FederatedDataLoaderManager:
       # Create and save absolute counts heatmap
       fig_abs, ax_abs = plt.subplots(figsize=(12, 8))
       sns.heatmap(df_abs_T, annot=True, fmt="d", cmap="YlOrRd", ax=ax_abs, cbar_kws={"label": "Sample Count"})
-      ax_abs.set_title(f"{dataset_name} Data Distribution (Absolute Counts)", fontsize=14, fontweight="bold")
+      ax_abs.set_title(f"{dataset_name} Data Distribution{alpha_info} (Absolute Counts)", fontsize=14, fontweight="bold")
       ax_abs.set_xlabel("Partition ID")
       ax_abs.set_ylabel("Class Labels")
       fig_abs.savefig(abs_path, dpi=300, bbox_inches="tight")
@@ -377,7 +380,7 @@ class FederatedDataLoaderManager:
       # Create and save percentage heatmap
       fig_pct, ax_pct = plt.subplots(figsize=(12, 8))
       sns.heatmap(df_pct_T, annot=True, fmt=".1f", cmap="YlOrRd", ax=ax_pct, cbar_kws={"label": "Percentage (%)"})
-      ax_pct.set_title(f"{dataset_name} Data Distribution (Percentage)", fontsize=14, fontweight="bold")
+      ax_pct.set_title(f"{dataset_name} Data Distribution{alpha_info} (Percentage)", fontsize=14, fontweight="bold")
       ax_pct.set_xlabel("Partition ID")
       ax_pct.set_ylabel("Class Labels")
       fig_pct.savefig(pct_path, dpi=300, bbox_inches="tight")
@@ -391,13 +394,13 @@ class FederatedDataLoaderManager:
 
       # Plot absolute counts heatmap
       sns.heatmap(df_abs_T, annot=True, fmt="d", cmap="YlOrRd", ax=ax1, cbar_kws={"label": "Sample Count"})
-      ax1.set_title(f"{dataset_name} Data Distribution (Absolute Counts)", fontsize=14, fontweight="bold")
+      ax1.set_title(f"{dataset_name} Data Distribution{alpha_info} (Absolute Counts)", fontsize=14, fontweight="bold")
       ax1.set_xlabel("Partition ID")
       ax1.set_ylabel("Class Labels")
 
       # Plot percentage heatmap
       sns.heatmap(df_pct_T, annot=True, fmt=".1f", cmap="YlOrRd", ax=ax2, cbar_kws={"label": "Percentage (%)"})
-      ax2.set_title(f"{dataset_name} Data Distribution (Percentage)", fontsize=14, fontweight="bold")
+      ax2.set_title(f"{dataset_name} Data Distribution{alpha_info} (Percentage)", fontsize=14, fontweight="bold")
       ax2.set_xlabel("Partition ID")
       ax2.set_ylabel("Class Labels")
 
