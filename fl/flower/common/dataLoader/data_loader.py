@@ -24,17 +24,30 @@ class DataLoaderConfig:
   This class contains all configurable parameters for federated data loading,
   including dataset selection, partitioner settings, data splits, and visualization options.
 
+  Note: Test data is always distributed using IID partitioning for fair evaluation,
+  while training data follows the specified partitioner configuration.
+
   Example:
     ```python
-    # Default configuration (FashionMNIST with Dirichlet α=1.0)
+    # Default configuration (Non-IID training data, IID test data)
     config = DataLoaderConfig()
 
-    # Custom configuration with different parameters
+    # Custom configuration with very heterogeneous training data
     config = DataLoaderConfig(
         dataset_name="zalando-datasets/fashion_mnist",
         partitioner_type="dirichlet",
-        alpha=0.5,  # More heterogeneous distribution
-        seed=123,   # Different random seed
+        alpha=0.1,  # Very heterogeneous training data
+        seed=42,
+        batch_size=64,
+        enable_visualization=True,
+        plot_type="heatmap"
+    )
+
+    # IID training and test data
+    config = DataLoaderConfig(
+        dataset_name="zalando-datasets/fashion_mnist",
+        partitioner_type="iid",  # IID training data
+        seed=123,
         batch_size=64,
         enable_visualization=True,
         plot_type="heatmap"
@@ -75,17 +88,20 @@ class FederatedDataLoaderManager:
   This class provides a flexible and configurable interface for federated data loading,
   supporting different datasets, partitioners, and visualization options.
 
+  Training data follows the specified partitioner configuration (e.g., Dirichlet for Non-IID),
+  while test data is always distributed using IID partitioning for fair evaluation.
+
   Examples:
     ```python
-    # Basic usage with default configuration
+    # Basic usage with default configuration (Non-IID train, IID test)
     manager = FederatedDataLoaderManager()
     train_loader, test_loader = manager.load_data(partition_id=0, num_partitions=2)
 
-    # Advanced usage with custom configuration
+    # Non-IID training data with automatic IID test data
     config = DataLoaderConfig(
         dataset_name="zalando-datasets/fashion_mnist",
         partitioner_type="dirichlet",
-        alpha=0.1,  # Very heterogeneous
+        alpha=0.1,  # Very heterogeneous training data
         seed=42,
         enable_visualization=True
     )
@@ -154,10 +170,12 @@ class FederatedDataLoaderManager:
   def _initialize_federated_dataset(self, num_partitions: int):
     """Initialize FederatedDataset if not already done."""
     if self.fds is None:
-      partitioner = self._create_partitioner(num_partitions)
+      train_partitioner = self._create_partitioner(num_partitions)
+      test_partitioner = IidPartitioner(num_partitions=num_partitions)  # Always IID for test data
+
       self.fds = FederatedDataset(
         dataset=self.config.dataset_name,
-        partitioners={"train": partitioner},
+        partitioners={"train": train_partitioner, "test": test_partitioner},
       )
 
   def load_data(
@@ -192,11 +210,14 @@ class FederatedDataLoaderManager:
 
     # Load partition data
     assert self.fds is not None  # Help type checker understand fds is initialized
-    partition = self.fds.load_partition(partition_id_int)
-    partition_train_test = partition.train_test_split(test_size=self.config.test_size, seed=self.config.split_seed)
 
-    train_partition = partition_train_test["train"].with_transform(self._apply_train_transforms)
-    test_partition = partition_train_test["test"].with_transform(self._apply_eval_transforms)
+    # Load train partition (follows specified partitioner) and test partition (always IID)
+    train_partition = self.fds.load_partition(partition_id_int, "train")
+    test_partition = self.fds.load_partition(partition_id_int, "test")
+
+    # Apply transforms
+    train_partition = train_partition.with_transform(self._apply_train_transforms)
+    test_partition = test_partition.with_transform(self._apply_eval_transforms)
 
     train_loader = DataLoader(train_partition, batch_size=self.config.batch_size, shuffle=self.config.shuffle_train)  # type: ignore
     test_loader = DataLoader(test_partition, batch_size=self.config.batch_size, shuffle=self.config.shuffle_test)  # type: ignore
