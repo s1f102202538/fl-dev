@@ -26,7 +26,11 @@ from flower.common.util.util import (
 
 
 class FedMoonClient(NumPyClient):
-  """ロジット共有機能を持つFedMoonクライアント"""
+  """ロジット共有機能を持つFedMoonクライアント
+
+  注意: このクライアントは一貫してMoonModelを使用します。
+  - self.net: MoonModel（MOON対比学習、訓練、評価、ロジット生成で一貫使用）
+  """
 
   def __init__(
     self,
@@ -38,9 +42,8 @@ class FedMoonClient(NumPyClient):
     local_epochs: UserConfigValue,
   ) -> None:
     super().__init__()
-    # ベースモデルとMOON投影ヘッド付きモデルを作成
-    self.base_net = net
-    self.net = MoonModel(base_model=net, out_dim=256, n_classes=10)
+    # MoonModelを一貫使用（蒸留、訓練、評価、ロジット生成すべて対応）
+    self.net = MoonModel(out_dim=256, n_classes=10)
     self.client_state = client_state
     self.train_loader = train_loader
     self.val_loader = val_loader
@@ -88,43 +91,30 @@ class FedMoonClient(NumPyClient):
       logits = base64_to_batch_list(config["avg_logits"])
       temperature = float(config.get("temperature", 3.0))
 
-      # 知識蒸留を実行して仮想グローバルモデルを作成
+      # 蒸留により仮想グローバルモデルを直接作成（MoonModelを使用）
+      virtual_global_model = MoonModel(out_dim=256, n_classes=10)
       distillation = Distillation(
-        studentModel=copy.deepcopy(self.base_net),  # ベースモデルを使用
+        studentModel=virtual_global_model,  # MoonModelを直接使用
         public_data=self.public_test_data,
         soft_targets=logits,
       )
 
-      # 蒸留により仮想グローバルベースモデルを作成
-      virtual_global_base = distillation.train_knowledge_distillation(
-        epochs=3,
-        learning_rate=0.01,
+      # MoonModelで知識蒸留を実行
+      virtual_global_model = distillation.train_knowledge_distillation(
+        epochs=1,
+        learning_rate=0.001,
         T=temperature,
         soft_target_loss_weight=0.4,
         ce_loss_weight=0.6,
         device=self.device,
       )
-
-      # MoonModelでラップして仮想グローバルモデルを作成
-      virtual_global_model = MoonModel(base_model=virtual_global_base, out_dim=256, n_classes=10)
       virtual_global_model.to(self.device)
 
       # グローバルモデルの設定確認
-      print("=== グローバルモデル設定確認 ===")
-      print(f"virtual_global_base type: {type(virtual_global_base)}")
+      print("=== 仮想グローバルモデル設定確認 ===")
+      print(f"virtual_global_model type: {type(virtual_global_model)}")
       print(f"virtual_global_model.features type: {type(virtual_global_model.features)}")
-
-      # 重みが正しくコピーされているかテスト（簡易版）
-      try:
-        from flower.common.models.mini_cnn import MiniCNN, MiniCNNFeatures
-
-        if isinstance(virtual_global_base, MiniCNN) and isinstance(virtual_global_model.features, MiniCNNFeatures):
-          print("グローバルモデルの重みコピー処理が実行されました")
-          print("MiniCNN → MiniCNNFeatures の変換完了")
-        else:
-          print(f"想定外の型組み合わせ: {type(virtual_global_base)} → {type(virtual_global_model.features)}")
-      except Exception as e:
-        print(f"型確認エラー: {e}")
+      print("蒸留によりMoonModelで直接仮想グローバルモデルを作成しました")
       print("=== 確認完了 ===")
 
       # Moon学習器を更新: previous_model -> 前ラウンドモデル, global_model -> 仮想グローバルモデル
@@ -145,17 +135,18 @@ class FedMoonClient(NumPyClient):
       else:
         print(f"ラウンド {current_round}: サーバーロジットなし、対比学習なし")
 
-    # 適応対比学習による拡張FedMoon訓練
+    # MOON対比学習による訓練（MoonModelを使用）
     train_loss = self.moon_trainer.train_with_enhanced_moon(
       model=self.net,
       train_loader=self.train_loader,
       lr=0.01,  # 元論文の推奨値
-      epochs=5,  # 設定ファイルの値を使用
+      epochs=3,  # 設定ファイルの値を使用
       current_round=current_round,
     )
 
-    # 共有用の高品質ロジット生成（ベースモデルで実行）
-    raw_logits = CNNTask.inference(self.base_net, self.public_test_data, device=self.device)
+    # ロジット共有用の高品質ロジット生成（MoonModelで実行）
+    # MoonModel専用のinferenceメソッドを使用（複数出力対応）
+    raw_logits = CNNTask.moon_inference(self.net, self.public_test_data, device=self.device)
     logit_batches = filter_and_calibrate_logits(raw_logits, temperature=1.5)
 
     # 学習完了後のローカルモデル状態を保存（MoonModel全体）
@@ -191,17 +182,8 @@ class FedMoonClient(NumPyClient):
     else:
       print("警告: 保存されたモデル状態が見つからないため、初期状態のモデルを使用します")
 
-    # MoonModelのpredictメソッドを使用して分類出力のみ取得
-    class MoonModelEvaluator(torch.nn.Module):
-      def __init__(self, moon_model):
-        super().__init__()
-        self.moon_model = moon_model
-
-      def forward(self, x):
-        return self.moon_model.predict(x)
-
-    evaluator = MoonModelEvaluator(self.net)
-    loss, accuracy = CNNTask.test(evaluator, self.val_loader, device=self.device)
+      # MoonModel専用のテストメソッドを使用（複数出力対応）
+    loss, accuracy = CNNTask.moon_test(self.net, self.val_loader, device=self.device)
 
     # 分析用の追加メトリクス
     current_round = int(config.get("current_round", 0))

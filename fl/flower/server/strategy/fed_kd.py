@@ -16,7 +16,7 @@ from torch import Tensor
 
 from flower.common.util.util import base64_to_batch_list, batch_list_to_base64, create_run_dir
 
-PROJECT_NAME = "fl-dev"
+PROJECT_NAME = "fl-dev-cifer-10"
 
 
 class FedKD(Strategy):

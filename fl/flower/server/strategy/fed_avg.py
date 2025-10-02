@@ -14,7 +14,7 @@ from flwr.server.strategy import FedAvg
 from flower.common.models.mini_cnn import MiniCNN
 from flower.common.util.util import create_run_dir, set_weights
 
-PROJECT_NAME = "fl-dev"
+PROJECT_NAME = "fl-dev-cifer-10"
 
 
 class CustomFedAvg(FedAvg):
