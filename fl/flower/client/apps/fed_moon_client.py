@@ -21,7 +21,6 @@ from flower.common.util.util import (
   batch_list_to_base64,
   filter_and_calibrate_logits,
   load_model_from_state,
-  load_moon_model_with_compatibility,
   save_model_to_state,
 )
 
@@ -55,7 +54,7 @@ class FedMoonClient(NumPyClient):
     # 前ラウンドモデル保存用
     self.previous_model_name = "fed-moon-previous-model"
 
-    # Moon対比学習の初期化（論文推奨値ベース）
+    # Moon対比学習の初期化
     self.moon_learner = MoonContrastiveLearning(
       mu=1.0,
       temperature=0.5,
@@ -73,10 +72,10 @@ class FedMoonClient(NumPyClient):
     current_round = int(config.get("current_round", 0))
 
     # 前ラウンドモデルを復元（対比学習用）
-    previous_round_model = load_moon_model_with_compatibility(self.client_state, self.net, self.previous_model_name)
+    previous_round_model = load_model_from_state(self.client_state, self.net, self.previous_model_name)
 
     # 現在のローカルモデル状態を復元
-    loaded_model = load_moon_model_with_compatibility(self.client_state, self.net, self.local_model_name)
+    loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     if loaded_model is not None:
       self.net = loaded_model
       print(f"ローカルモデルを復元しました (ラウンド {current_round})")
@@ -98,8 +97,8 @@ class FedMoonClient(NumPyClient):
 
       # 蒸留により仮想グローバルベースモデルを作成
       virtual_global_base = distillation.train_knowledge_distillation(
-        epochs=1,  # FedKDと同等に設定
-        learning_rate=0.001,
+        epochs=3,
+        learning_rate=0.01,
         T=temperature,
         soft_target_loss_weight=0.4,
         ce_loss_weight=0.6,
@@ -108,12 +107,30 @@ class FedMoonClient(NumPyClient):
 
       # MoonModelでラップして仮想グローバルモデルを作成
       virtual_global_model = MoonModel(base_model=virtual_global_base, out_dim=256, n_classes=10)
+      virtual_global_model.to(self.device)
+
+      # グローバルモデルの設定確認
+      print("=== グローバルモデル設定確認 ===")
+      print(f"virtual_global_base type: {type(virtual_global_base)}")
+      print(f"virtual_global_model.features type: {type(virtual_global_model.features)}")
+
+      # 重みが正しくコピーされているかテスト（簡易版）
+      try:
+        from flower.common.models.mini_cnn import MiniCNN, MiniCNNFeatures
+
+        if isinstance(virtual_global_base, MiniCNN) and isinstance(virtual_global_model.features, MiniCNNFeatures):
+          print("グローバルモデルの重みコピー処理が実行されました")
+          print("MiniCNN → MiniCNNFeatures の変換完了")
+        else:
+          print(f"想定外の型組み合わせ: {type(virtual_global_base)} → {type(virtual_global_model.features)}")
+      except Exception as e:
+        print(f"型確認エラー: {e}")
+      print("=== 確認完了 ===")
 
       # Moon学習器を更新: previous_model -> 前ラウンドモデル, global_model -> 仮想グローバルモデル
       if previous_round_model is not None:
-        # 前ラウンドモデルをMoonModelでラップ
-        previous_moon_model = MoonModel(base_model=previous_round_model, out_dim=256, n_classes=10)
-        self.moon_learner.update_models(previous_moon_model, virtual_global_model)
+        # previous_round_modelは既にMoonModelなので、そのまま使用
+        self.moon_learner.update_models(previous_round_model, virtual_global_model)
         print("前ラウンドモデルと仮想グローバルモデルでMoon学習器を更新しました")
       else:
         # 初回ラウンドの場合、現在のモデルをpreviousとして使用
@@ -132,8 +149,8 @@ class FedMoonClient(NumPyClient):
     train_loss = self.moon_trainer.train_with_enhanced_moon(
       model=self.net,
       train_loader=self.train_loader,
-      lr=0.1,  # 論文準拠のデフォルト学習率
-      epochs=self.local_epochs,  # 設定ファイルの値を使用
+      lr=0.01,  # 元論文の推奨値
+      epochs=5,  # 設定ファイルの値を使用
       current_round=current_round,
     )
 
@@ -141,12 +158,13 @@ class FedMoonClient(NumPyClient):
     raw_logits = CNNTask.inference(self.base_net, self.public_test_data, device=self.device)
     logit_batches = filter_and_calibrate_logits(raw_logits, temperature=1.5)
 
-    # 学習完了後のローカルモデル状態を保存（ベースモデル）
-    save_model_to_state(self.base_net, self.client_state, self.local_model_name)
+    # 学習完了後のローカルモデル状態を保存（MoonModel全体）
+    save_model_to_state(self.net, self.client_state, self.local_model_name)
 
-    # 次ラウンド用：現在のモデルを前ラウンドモデルとして保存
+    # 次ラウンド用：現在のMoonModel全体を前ラウンドモデルとして保存
     # 注意：学習前ではなく学習後のモデルを次ラウンドのprevious_modelとして使用
-    save_model_to_state(self.base_net, self.client_state, self.previous_model_name)
+    # MoonModelには投影ヘッドも含まれているため、全体を保存する必要がある
+    save_model_to_state(self.net, self.client_state, self.previous_model_name)
 
     print(f"FedMoon拡張クライアント完了 (ラウンド {current_round})")
     print("クライアント送信ロジット統計:", [b.mean().item() for b in logit_batches])
@@ -166,14 +184,24 @@ class FedMoonClient(NumPyClient):
     # 注意: サーバーからロジットのみを受信するため、parametersは使用されません
     # モデル評価は現在のローカルモデル状態を使用します
 
-    # モデルをロードする（ベースモデル）
-    loaded_model = load_model_from_state(self.client_state, self.base_net, self.local_model_name)
+    # モデルをロードする（MoonModel全体）
+    loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     if loaded_model is not None:
-      self.base_net = loaded_model
+      self.net = loaded_model
     else:
       print("警告: 保存されたモデル状態が見つからないため、初期状態のモデルを使用します")
 
-    loss, accuracy = CNNTask.test(self.base_net, self.val_loader, device=self.device)
+    # MoonModelのpredictメソッドを使用して分類出力のみ取得
+    class MoonModelEvaluator(torch.nn.Module):
+      def __init__(self, moon_model):
+        super().__init__()
+        self.moon_model = moon_model
+
+      def forward(self, x):
+        return self.moon_model.predict(x)
+
+    evaluator = MoonModelEvaluator(self.net)
+    loss, accuracy = CNNTask.test(evaluator, self.val_loader, device=self.device)
 
     # 分析用の追加メトリクス
     current_round = int(config.get("current_round", 0))

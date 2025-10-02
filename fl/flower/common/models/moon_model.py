@@ -1,70 +1,108 @@
-"""MOON用の投影ヘッド付きモデル"""
+"""MOON (Model-Contrastive Federated Learning) モデル実装
+
+MOON論文の公式実装に準拠した投影ヘッド付きモデル
+Reference: https://github.com/Xtra-Computing/MOON/blob/main/model.py
+"""
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .mini_cnn import MiniCNN, MiniCNNFeatures
+
 
 class MoonModel(nn.Module):
-  """MOON論文準拠の投影ヘッド付きモデル（state_dict互換性確保）"""
+  """MOON公式実装準拠の投影ヘッド付きモデル"""
 
-  def __init__(self, base_model: nn.Module, out_dim: int = 256, n_classes: int = 10):
+  def __init__(self, base_model: nn.Module | None = None, out_dim: int = 256, n_classes: int = 10):
     """
     Args:
-        base_model: ベースとなるMiniCNNモデル
-        out_dim: 投影ヘッドの出力次元
+        base_model: ベースとなるモデル（蒸留済みモデル等）
+        out_dim: 投影ヘッドの出力次元（論文準拠で256）
         n_classes: 分類クラス数
     """
     super().__init__()
 
-    # ベースモデルを保持
-    self.base_model = base_model
+    # ベースモデルが提供された場合はその特徴量抽出器を使用
+    if base_model is not None:
+      print("MoonModel: 提供されたbase_modelから特徴量抽出器を作成")
+      # MiniCNNの場合、特徴量抽出部分を複製
+      try:
+        if isinstance(base_model, MiniCNN):
+          # MiniCNNから特徴量抽出器を作成
+          features_extractor = MiniCNNFeatures()
 
-    # MiniCNNのfc1出力は128次元
-    self.feature_dim = 128
+          # 学習済みMiniCNNの重みを特徴量抽出器にコピー
+          features_extractor.conv1.load_state_dict(base_model.conv1.state_dict())
+          features_extractor.conv2.load_state_dict(base_model.conv2.state_dict())
+          features_extractor.fc1.load_state_dict(base_model.fc1.state_dict())
+
+          # Dropoutレイヤーは新しいインスタンスを使用（パラメータなし）
+          # features_extractor.dropout と features_extractor.dropout_fc は既に初期化済み
+
+          self.features = features_extractor
+          print("MiniCNNの学習済み重みを特徴量抽出器にコピーしました")
+
+          # 重みコピーの確認
+          print(f"Conv1重み確認: {torch.allclose(features_extractor.conv1.weight, base_model.conv1.weight)}")
+          print(f"FC1重み確認: {torch.allclose(features_extractor.fc1.weight, base_model.fc1.weight)}")
+
+        else:
+          # その他のモデル形式
+          print(f"非MiniCNNモデル: {type(base_model)}")
+          self.features = base_model
+      except Exception as e:
+        print(f"base_model処理に失敗、デフォルトを使用: {e}")
+        self.features = MiniCNNFeatures()
+    else:
+      print("MoonModel: 新しいMiniCNNFeaturesを使用")
+      # MOON公式実装準拠：特徴量抽出器を直接保持
+      self.features = MiniCNNFeatures()
+
+    # 特徴量次元（MiniCNNFeatures の fc1 出力）
+    num_ftrs = 128
 
     # 投影ヘッド
-    self.l1 = nn.Linear(self.feature_dim, self.feature_dim)
-    self.l2 = nn.Linear(self.feature_dim, out_dim)
+    self.l1 = nn.Linear(num_ftrs, num_ftrs)  # 128 -> 128
+    self.l2 = nn.Linear(num_ftrs, out_dim)  # 128 -> 256
 
-    # 分類ヘッド
-    self.l3 = nn.Linear(out_dim, n_classes)
-
-  def forward_features(self, x: torch.Tensor) -> torch.Tensor:
-    """ベースモデルから特徴量を抽出"""
-    # MiniCNNのConv層を通す
-    x = F.relu(self.base_model.conv1(x))  # type: ignore
-    x = self.base_model.pool(x)  # type: ignore
-    x = F.relu(self.base_model.conv2(x))  # type: ignore
-    x = self.base_model.pool(x)  # type: ignore
-    x = self.base_model.dropout(x)  # type: ignore
-
-    # 平坦化して最初の全結合層を通す
-    x = x.view(x.size(0), -1)
-    features = F.relu(self.base_model.fc1(x))  # type: ignore
-    features = self.base_model.dropout_fc(features)  # type: ignore
-
-    return features
+    # 分類ヘッド（投影特徴量から分類）
+    self.l3 = nn.Linear(out_dim, n_classes)  # 256 -> 10
 
   def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
-    論文実装に準拠したフォワードパス
+    MOON公式実装準拠のフォワードパス
+    Reference: https://github.com/Xtra-Computing/MOON/blob/main/model.py#L577-587
 
     Returns:
-        h: ベース特徴量 (feature_dim次元)
-        x_proj: 投影後特徴量 (out_dim次元) - 対比学習で使用
-        y: 分類出力 (n_classes次元)
+        h: ベース特徴量 (128次元)
+        proj: 投影後特徴量 (256次元) - 対比学習用
+        y: 分類出力 (10次元) - 投影特徴量から分類
     """
-    # ベース特徴量を取得
-    h = self.forward_features(x)
-    h = h.squeeze()
+    # 特徴量抽出
+    h = self.features(x)
+    # バッチ次元を保持しながら不要な次元のみを削除
+    if h.dim() > 2:
+      h = h.view(h.size(0), -1)  # (batch_size, features)
 
     # 投影ヘッドを通す
-    projected = self.l1(h)
-    projected = F.relu(projected)
-    x_proj = self.l2(projected)
+    proj = self.l1(h)
+    proj = F.relu(proj)
+    proj = self.l2(proj)
 
-    # 分類出力
-    y = self.l3(x_proj)
+    # 分類出力（投影特徴量から分類）
+    y = self.l3(proj)
 
-    return h, x_proj, y
+    return h, proj, y
+
+  def predict(self, x: torch.Tensor) -> torch.Tensor:
+    """評価用：分類出力のみを返す（CNNTaskとの互換性のため）
+
+    Args:
+        x: 入力テンソル
+
+    Returns:
+        y: 分類出力のみ (10次元)
+    """
+    _, _, y = self.forward(x)
+    return y
