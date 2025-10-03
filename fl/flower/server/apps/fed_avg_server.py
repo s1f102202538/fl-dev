@@ -7,10 +7,11 @@ from flwr.common.typing import NDArrays, UserConfig
 from flwr.server import ServerAppComponents, ServerConfig
 from torch.utils.data import DataLoader
 
-from flower.common.dataLoader.data_loader import apply_eval_transforms
+from flower.common._class.data_loader_manager import DataLoaderManager
+from flower.common._class.data_transform_manager import DataTransformManager
 from flower.common.models.mini_cnn import MiniCNN
 from flower.common.task.cnn_task import CNNTask
-from flower.common.util.util import get_weights, set_weights, weighted_average
+from flower.common.util.model_util import get_weights, set_weights, weighted_average
 from flower.server.strategy.fed_avg import CustomFedAvg
 
 
@@ -62,7 +63,7 @@ class FedAvgServer:
     global_test_set = load_dataset("zalando-datasets/fashion_mnist", split="test")
 
     testloader = DataLoader(
-      global_test_set.with_transform(apply_eval_transforms),  # type: ignore
+      global_test_set.with_transform(DataTransformManager(DataLoaderManager()).apply_eval_transforms),  # type: ignore
       batch_size=32,
     )
 

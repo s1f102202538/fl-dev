@@ -9,17 +9,17 @@ from flwr.common import Context, RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
-from flower.common.dataLoader.data_loader import load_data, load_public_data
-from flower.common.models.mini_cnn import MiniCNN
-from flower.common.task.cnn_task import CNNTask
-from flower.common.task.distillation import Distillation
-from flower.common.util.util import (
+from fl.flower.common.util.data_loader import load_data, load_public_data
+from fl.flower.common.util.model_util import (
   base64_to_batch_list,
   batch_list_to_base64,
   filter_and_calibrate_logits,
   load_model_from_state,
   save_model_to_state,
 )
+from flower.common.models.mini_cnn import MiniCNN
+from flower.common.task.cnn_task import CNNTask
+from flower.common.task.distillation import Distillation
 
 
 class FedKdClient(NumPyClient):
