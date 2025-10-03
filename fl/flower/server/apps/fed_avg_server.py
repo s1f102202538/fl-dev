@@ -2,18 +2,19 @@ from typing import Callable, Tuple
 
 import torch
 from datasets import load_dataset
-from flower.common.dataLoader.data_loader import apply_eval_transforms
-from flower.common.models.mini_cnn import MiniCNN
-from flower.common.task.cnn_task import CNNTask
-from flower.common.util.util import get_weights, set_weights, weighted_average
-from flower.server.strategy.fed_avg import CustomFedAvg
 from flwr.common import Context, ndarrays_to_parameters
 from flwr.common.typing import NDArrays, UserConfig
 from flwr.server import ServerAppComponents, ServerConfig
 from torch.utils.data import DataLoader
 
+from flower.common.dataLoader.data_loader import apply_eval_transforms
+from flower.common.models.mini_cnn import MiniCNN
+from flower.common.task.cnn_task import CNNTask
+from flower.common.util.util import get_weights, set_weights, weighted_average
+from flower.server.strategy.fed_avg import CustomFedAvg
 
-class FlowerDemoServer:
+
+class FedAvgServer:
   @staticmethod
   def gen_evaluate_fn(
     testloader: DataLoader,
@@ -72,9 +73,12 @@ class FlowerDemoServer:
       fraction_fit=fraction_fit,
       fraction_evaluate=fraction_eval,
       initial_parameters=parameters,
-      on_fit_config_fn=FlowerDemoServer.on_fit_config,
-      evaluate_fn=FlowerDemoServer.gen_evaluate_fn(testloader, device=server_device),
+      on_fit_config_fn=FedAvgServer.on_fit_config,
+      evaluate_fn=FedAvgServer.gen_evaluate_fn(testloader, device=server_device),
       evaluate_metrics_aggregation_fn=weighted_average,
+      min_fit_clients=5,
+      min_evaluate_clients=5,
+      min_available_clients=5,
     )
     config = ServerConfig(num_rounds=num_rounds)
 

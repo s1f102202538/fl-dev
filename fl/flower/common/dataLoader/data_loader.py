@@ -24,17 +24,30 @@ class DataLoaderConfig:
   This class contains all configurable parameters for federated data loading,
   including dataset selection, partitioner settings, data splits, and visualization options.
 
+  Note: Test data is always distributed using IID partitioning for fair evaluation,
+  while training data follows the specified partitioner configuration.
+
   Example:
     ```python
-    # Default configuration (FashionMNIST with Dirichlet α=1.0)
+    # Default configuration (Non-IID training data, IID test data)
     config = DataLoaderConfig()
 
-    # Custom configuration with different parameters
+    # Custom configuration with very heterogeneous training data
     config = DataLoaderConfig(
         dataset_name="zalando-datasets/fashion_mnist",
         partitioner_type="dirichlet",
-        alpha=0.5,  # More heterogeneous distribution
-        seed=123,   # Different random seed
+        alpha=0.1,  # Very heterogeneous training data
+        seed=42,
+        batch_size=64,
+        enable_visualization=True,
+        plot_type="heatmap"
+    )
+
+    # IID training and test data
+    config = DataLoaderConfig(
+        dataset_name="zalando-datasets/fashion_mnist",
+        partitioner_type="iid",  # IID training data
+        seed=123,
         batch_size=64,
         enable_visualization=True,
         plot_type="heatmap"
@@ -43,11 +56,11 @@ class DataLoaderConfig:
   """
 
   # Dataset configuration
-  dataset_name: str = "zalando-datasets/fashion_mnist"
+  dataset_name: str = "uoft-cs/cifar10"
 
   # Partitioner configuration
   partitioner_type: str = "dirichlet"  # "dirichlet" or "iid"
-  alpha: float = 1.0  # For DirichletPartitioner
+  alpha: float = 0.2  # For DirichletPartitioner
   partition_by: str = "label"
   seed: int = 42
 
@@ -75,17 +88,20 @@ class FederatedDataLoaderManager:
   This class provides a flexible and configurable interface for federated data loading,
   supporting different datasets, partitioners, and visualization options.
 
+  Training data follows the specified partitioner configuration (e.g., Dirichlet for Non-IID),
+  while test data is always distributed using IID partitioning for fair evaluation.
+
   Examples:
     ```python
-    # Basic usage with default configuration
+    # Basic usage with default configuration (Non-IID train, IID test)
     manager = FederatedDataLoaderManager()
     train_loader, test_loader = manager.load_data(partition_id=0, num_partitions=2)
 
-    # Advanced usage with custom configuration
+    # Non-IID training data with automatic IID test data
     config = DataLoaderConfig(
         dataset_name="zalando-datasets/fashion_mnist",
         partitioner_type="dirichlet",
-        alpha=0.1,  # Very heterogeneous
+        alpha=0.1,  # Very heterogeneous training data
         seed=42,
         enable_visualization=True
     )
@@ -123,14 +139,23 @@ class FederatedDataLoaderManager:
     """Setup data transforms based on dataset."""
     if "fashion_mnist" in self.config.dataset_name.lower():
       normalization = ((0.1307,), (0.3081,))
+      crop_size = 28
+      channels = 1
+    elif "cifar" in self.config.dataset_name.lower():
+      # CIFAR-10/100 specific normalization
+      normalization = ((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+      crop_size = 32
+      channels = 3
     else:
-      # Default CIFAR-like normalization
+      # Default CIFAR-like normalization for other datasets
       normalization = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+      crop_size = 32
+      channels = 3
 
     self.eval_transforms = Compose([ToTensor(), Normalize(*normalization)])
     self.train_transforms = Compose(
       [
-        RandomCrop(28, padding=4) if "fashion_mnist" in self.config.dataset_name.lower() else RandomCrop(32, padding=4),
+        RandomCrop(crop_size, padding=4),
         RandomHorizontalFlip(),
         ToTensor(),
         Normalize(*normalization),
@@ -154,10 +179,12 @@ class FederatedDataLoaderManager:
   def _initialize_federated_dataset(self, num_partitions: int):
     """Initialize FederatedDataset if not already done."""
     if self.fds is None:
-      partitioner = self._create_partitioner(num_partitions)
+      train_partitioner = self._create_partitioner(num_partitions)
+      test_partitioner = IidPartitioner(num_partitions=num_partitions)  # Always IID for test data
+
       self.fds = FederatedDataset(
         dataset=self.config.dataset_name,
-        partitioners={"train": partitioner},
+        partitioners={"train": train_partitioner, "test": test_partitioner},
       )
 
   def load_data(
@@ -192,11 +219,14 @@ class FederatedDataLoaderManager:
 
     # Load partition data
     assert self.fds is not None  # Help type checker understand fds is initialized
-    partition = self.fds.load_partition(partition_id_int)
-    partition_train_test = partition.train_test_split(test_size=self.config.test_size, seed=self.config.split_seed)
 
-    train_partition = partition_train_test["train"].with_transform(self._apply_train_transforms)
-    test_partition = partition_train_test["test"].with_transform(self._apply_eval_transforms)
+    # Load train partition (follows specified partitioner) and test partition (always IID)
+    train_partition = self.fds.load_partition(partition_id_int, "train")
+    test_partition = self.fds.load_partition(partition_id_int, "test")
+
+    # Apply transforms
+    train_partition = train_partition.with_transform(self._apply_train_transforms)
+    test_partition = test_partition.with_transform(self._apply_eval_transforms)
 
     train_loader = DataLoader(train_partition, batch_size=self.config.batch_size, shuffle=self.config.shuffle_train)  # type: ignore
     test_loader = DataLoader(test_partition, batch_size=self.config.batch_size, shuffle=self.config.shuffle_test)  # type: ignore
@@ -266,7 +296,9 @@ class FederatedDataLoaderManager:
       return self._create_dual_heatmaps(partitioner_with_data, num_partitions, save_path, quiet)
     else:
       # Create single visualization for bar plots
-      title = f"{self.config.dataset_name.split('/')[-1].upper()} Data Distribution ({size_unit.capitalize()} counts, {plot_type} plot)"
+      dataset_name = self.config.dataset_name.split("/")[-1].upper()
+      alpha_info = f" (α={self.config.alpha})" if self.config.partitioner_type.lower() == "dirichlet" else ""
+      title = f"{dataset_name} Data Distribution{alpha_info} ({size_unit.capitalize()} counts, {plot_type} plot)"
       plot_kwargs = {"annot": True} if plot_type == "heatmap" else {}
 
       fig, ax, df = plot_label_distributions(
@@ -297,6 +329,7 @@ class FederatedDataLoaderManager:
     import matplotlib.pyplot as plt
 
     dataset_name = self.config.dataset_name.split("/")[-1].upper()
+    alpha_info = f" (α={self.config.alpha})" if self.config.partitioner_type.lower() == "dirichlet" else ""
 
     # Create absolute counts heatmap
     fig1, ax1_temp, df_abs = plot_label_distributions(
@@ -307,7 +340,7 @@ class FederatedDataLoaderManager:
       partition_id_axis="x",
       legend=True,
       verbose_labels=True,
-      title=f"{dataset_name} Data Distribution (Absolute counts)",
+      title=f"{dataset_name} Data Distribution{alpha_info} (Absolute counts)",
       cmap="YlOrRd",
       plot_kwargs={"annot": True, "fmt": "d"},
     )
@@ -322,7 +355,7 @@ class FederatedDataLoaderManager:
       partition_id_axis="x",
       legend=True,
       verbose_labels=True,
-      title=f"{dataset_name} Data Distribution (Percentage)",
+      title=f"{dataset_name} Data Distribution{alpha_info} (Percentage)",
       cmap="YlOrRd",
       plot_kwargs={"annot": True, "fmt": ".1f"},
     )
@@ -347,7 +380,7 @@ class FederatedDataLoaderManager:
       # Create and save absolute counts heatmap
       fig_abs, ax_abs = plt.subplots(figsize=(12, 8))
       sns.heatmap(df_abs_T, annot=True, fmt="d", cmap="YlOrRd", ax=ax_abs, cbar_kws={"label": "Sample Count"})
-      ax_abs.set_title(f"{dataset_name} Data Distribution (Absolute Counts)", fontsize=14, fontweight="bold")
+      ax_abs.set_title(f"{dataset_name} Data Distribution{alpha_info} (Absolute Counts)", fontsize=14, fontweight="bold")
       ax_abs.set_xlabel("Partition ID")
       ax_abs.set_ylabel("Class Labels")
       fig_abs.savefig(abs_path, dpi=300, bbox_inches="tight")
@@ -356,7 +389,7 @@ class FederatedDataLoaderManager:
       # Create and save percentage heatmap
       fig_pct, ax_pct = plt.subplots(figsize=(12, 8))
       sns.heatmap(df_pct_T, annot=True, fmt=".1f", cmap="YlOrRd", ax=ax_pct, cbar_kws={"label": "Percentage (%)"})
-      ax_pct.set_title(f"{dataset_name} Data Distribution (Percentage)", fontsize=14, fontweight="bold")
+      ax_pct.set_title(f"{dataset_name} Data Distribution{alpha_info} (Percentage)", fontsize=14, fontweight="bold")
       ax_pct.set_xlabel("Partition ID")
       ax_pct.set_ylabel("Class Labels")
       fig_pct.savefig(pct_path, dpi=300, bbox_inches="tight")
@@ -370,13 +403,13 @@ class FederatedDataLoaderManager:
 
       # Plot absolute counts heatmap
       sns.heatmap(df_abs_T, annot=True, fmt="d", cmap="YlOrRd", ax=ax1, cbar_kws={"label": "Sample Count"})
-      ax1.set_title(f"{dataset_name} Data Distribution (Absolute Counts)", fontsize=14, fontweight="bold")
+      ax1.set_title(f"{dataset_name} Data Distribution{alpha_info} (Absolute Counts)", fontsize=14, fontweight="bold")
       ax1.set_xlabel("Partition ID")
       ax1.set_ylabel("Class Labels")
 
       # Plot percentage heatmap
       sns.heatmap(df_pct_T, annot=True, fmt=".1f", cmap="YlOrRd", ax=ax2, cbar_kws={"label": "Percentage (%)"})
-      ax2.set_title(f"{dataset_name} Data Distribution (Percentage)", fontsize=14, fontweight="bold")
+      ax2.set_title(f"{dataset_name} Data Distribution{alpha_info} (Percentage)", fontsize=14, fontweight="bold")
       ax2.set_xlabel("Partition ID")
       ax2.set_ylabel("Class Labels")
 
@@ -426,12 +459,42 @@ class FederatedDataLoaderManager:
 
   def _apply_train_transforms(self, batch: Dict[str, Any]) -> Dict[str, Any]:
     """Apply transforms to the training partition."""
-    batch["image"] = [self.train_transforms(img) for img in batch["image"]]
+    # CIFAR-10データセットでは'img'キーを使用
+    image_key = "img" if "img" in batch else "image"
+
+    # PIL.Imageをテンソルに変換
+    from PIL import Image
+
+    transformed_images = []
+    for img in batch[image_key]:
+      if not isinstance(img, Image.Image):
+        img = Image.fromarray(img)
+      transformed_images.append(self.train_transforms(img))
+
+    # 元のキーを削除して新しいキーに設定
+    if image_key != "image":
+      del batch[image_key]
+    batch["image"] = transformed_images
     return batch
 
   def _apply_eval_transforms(self, batch: Dict[str, Any]) -> Dict[str, Any]:
     """Apply transforms to the evaluation partition."""
-    batch["image"] = [self.eval_transforms(img) for img in batch["image"]]
+    # CIFAR-10データセットでは'img'キーを使用
+    image_key = "img" if "img" in batch else "image"
+
+    # PIL.Imageをテンソルに変換
+    from PIL import Image
+
+    transformed_images = []
+    for img in batch[image_key]:
+      if not isinstance(img, Image.Image):
+        img = Image.fromarray(img)
+      transformed_images.append(self.eval_transforms(img))
+
+    # 元のキーを削除して新しいキーに設定
+    if image_key != "image":
+      del batch[image_key]
+    batch["image"] = transformed_images
     return batch
 
 
@@ -447,7 +510,9 @@ class PublicDataset(Dataset):
 
   def __getitem__(self, idx):
     item = self.hf_dataset[idx]
-    image = item["image"]
+    # CIFAR-10データセットでは'img'キーを使用
+    image_key = "img" if "img" in item else "image"
+    image = item[image_key]
     label = item["label"]
 
     # Convert to PIL Image if needed

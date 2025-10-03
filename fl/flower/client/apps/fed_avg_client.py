@@ -2,19 +2,20 @@
 
 import numpy as np
 import torch
-from flower.common.dataLoader.data_loader import load_data
-from flower.common.models.mini_cnn import MiniCNN
-from flower.common.task.cnn_task import CNNTask
-from flower.common.util.util import get_weights, set_weights
 from flwr.client import NumPyClient
 from flwr.client.client import Client
 from flwr.common import ArrayRecord, Context, RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
+from flower.common.dataLoader.data_loader import load_data
+from flower.common.models.mini_cnn import MiniCNN
+from flower.common.task.cnn_task import CNNTask
+from flower.common.util.util import get_weights, set_weights
+
 
 # Define Flower Client and client_fn
-class FlowerDemoClient(NumPyClient):
+class FedAvgClient(NumPyClient):
   """A simple client that showcases how to use the state.
 
   It implements a basic version of `personalization` by which
@@ -108,4 +109,4 @@ class FlowerDemoClient(NumPyClient):
     # participation rounds. Note that each client always
     # receives the same Context instance (it's a 1:1 mapping)
     client_state = context.state
-    return FlowerDemoClient(net, client_state, train_loader, val_loader, local_epochs).to_client()
+    return FedAvgClient(net, client_state, train_loader, val_loader, local_epochs).to_client()

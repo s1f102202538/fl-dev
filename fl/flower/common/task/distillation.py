@@ -105,11 +105,22 @@ class Distillation:
 
           optimizer.zero_grad()
 
-          student_logits = self.studentModel(inputs)
+          student_outputs = self.studentModel(inputs)
 
-          # ロジットのクリッピング
+          # MoonModelの場合は複数出力 (h, proj, y) なので分類出力のみを取得
+          if isinstance(student_outputs, tuple) and len(student_outputs) == 3:
+            # MoonModel: (h, proj, y) -> y (分類出力)
+            student_logits = student_outputs[2]
+          else:
+            # 通常のモデル: 単一出力
+            student_logits = student_outputs
+
+          # ロジットのクリッピング（型チェック済みでTensorを保証）
           soft_batch_clipped = torch.clamp(soft_batch, min=-20, max=20)
-          student_logits_clipped = torch.clamp(student_logits, min=-20, max=20)
+          if isinstance(student_logits, torch.Tensor):
+            student_logits_clipped = torch.clamp(student_logits, min=-20, max=20)
+          else:
+            raise TypeError(f"student_logits is not a Tensor: {type(student_logits)}")
 
           # 温度スケーリングされたソフトマックス
           soft_targets_temp = F.softmax(soft_batch_clipped / T, dim=1)

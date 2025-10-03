@@ -22,7 +22,7 @@ from flower.common.util.util import (
 )
 
 
-class FedKDClient(NumPyClient):
+class FedKdClient(NumPyClient):
   def __init__(
     self,
     net: MiniCNN,
@@ -51,9 +51,6 @@ class FedKDClient(NumPyClient):
       print("[DEBUG] Previous round model loaded successfully")
     else:
       print("[DEBUG] No previous model found, using initial model")
-
-    # Config から学習率と共有ロジットの取得
-    lr = float(config["lr"])
 
     # 初回ラウンドでは avg_logits がない場合があるのでチェック
     if "avg_logits" in config and config["avg_logits"] is not None:
@@ -89,7 +86,7 @@ class FedKDClient(NumPyClient):
       self.net,
       self.train_loader,
       self.local_epochs,
-      lr=lr,
+      lr=0.01,
       device=self.device,
     )
 
@@ -173,4 +170,4 @@ class FedKDClient(NumPyClient):
     # participation rounds. Note that each client always
     # receives the same Context instance (it's a 1:1 mapping)
     client_state = context.state
-    return FedKDClient(net, client_state, train_loader, val_loader, public_test_data, local_epochs).to_client()
+    return FedKdClient(net, client_state, train_loader, val_loader, public_test_data, local_epochs).to_client()
