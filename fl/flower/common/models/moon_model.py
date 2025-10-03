@@ -31,7 +31,7 @@ class MoonModel(nn.Module):
 
     # 投影ヘッド
     self.l1 = nn.Linear(num_ftrs, num_ftrs)  # 128 -> 128
-    self.l2 = nn.Linear(out_dim, n_classes)  # 128 -> 256
+    self.l2 = nn.Linear(num_ftrs, out_dim)  # 128 -> 256
 
     # 分類ヘッド（投影特徴量から分類）
     self.l3 = nn.Linear(out_dim, n_classes)  # 256 -> 10

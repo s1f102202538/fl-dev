@@ -56,7 +56,7 @@ class DataLoaderConfig:
   """
 
   # Dataset configuration
-  dataset_name: str = "zalando-datasets/fashion_mnist"
+  dataset_name: str = "uoft-cs/cifar10"
 
   # Partitioner configuration
   partitioner_type: str = "dirichlet"  # "dirichlet" or "iid"
@@ -139,14 +139,23 @@ class FederatedDataLoaderManager:
     """Setup data transforms based on dataset."""
     if "fashion_mnist" in self.config.dataset_name.lower():
       normalization = ((0.1307,), (0.3081,))
+      crop_size = 28
+      channels = 1
+    elif "cifar" in self.config.dataset_name.lower():
+      # CIFAR-10/100 specific normalization
+      normalization = ((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+      crop_size = 32
+      channels = 3
     else:
-      # Default CIFAR-like normalization
+      # Default CIFAR-like normalization for other datasets
       normalization = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+      crop_size = 32
+      channels = 3
 
     self.eval_transforms = Compose([ToTensor(), Normalize(*normalization)])
     self.train_transforms = Compose(
       [
-        RandomCrop(28, padding=4) if "fashion_mnist" in self.config.dataset_name.lower() else RandomCrop(32, padding=4),
+        RandomCrop(crop_size, padding=4),
         RandomHorizontalFlip(),
         ToTensor(),
         Normalize(*normalization),
@@ -450,12 +459,42 @@ class FederatedDataLoaderManager:
 
   def _apply_train_transforms(self, batch: Dict[str, Any]) -> Dict[str, Any]:
     """Apply transforms to the training partition."""
-    batch["image"] = [self.train_transforms(img) for img in batch["image"]]
+    # CIFAR-10データセットでは'img'キーを使用
+    image_key = "img" if "img" in batch else "image"
+
+    # PIL.Imageをテンソルに変換
+    from PIL import Image
+
+    transformed_images = []
+    for img in batch[image_key]:
+      if not isinstance(img, Image.Image):
+        img = Image.fromarray(img)
+      transformed_images.append(self.train_transforms(img))
+
+    # 元のキーを削除して新しいキーに設定
+    if image_key != "image":
+      del batch[image_key]
+    batch["image"] = transformed_images
     return batch
 
   def _apply_eval_transforms(self, batch: Dict[str, Any]) -> Dict[str, Any]:
     """Apply transforms to the evaluation partition."""
-    batch["image"] = [self.eval_transforms(img) for img in batch["image"]]
+    # CIFAR-10データセットでは'img'キーを使用
+    image_key = "img" if "img" in batch else "image"
+
+    # PIL.Imageをテンソルに変換
+    from PIL import Image
+
+    transformed_images = []
+    for img in batch[image_key]:
+      if not isinstance(img, Image.Image):
+        img = Image.fromarray(img)
+      transformed_images.append(self.eval_transforms(img))
+
+    # 元のキーを削除して新しいキーに設定
+    if image_key != "image":
+      del batch[image_key]
+    batch["image"] = transformed_images
     return batch
 
 
@@ -471,7 +510,9 @@ class PublicDataset(Dataset):
 
   def __getitem__(self, idx):
     item = self.hf_dataset[idx]
-    image = item["image"]
+    # CIFAR-10データセットでは'img'キーを使用
+    image_key = "img" if "img" in item else "image"
+    image = item[image_key]
     label = item["label"]
 
     # Convert to PIL Image if needed
