@@ -2,8 +2,8 @@
 
 from typing import Union
 
-from .mini_cnn import MiniCNN, MiniCNNFeatures, MiniCNNFeaturesMNIST, MiniCNNMNIST
-from .moon_model import MoonModel
+from ..models.mini_cnn import MiniCNN, MiniCNNFeatures, MiniCNNFeaturesMNIST, MiniCNNMNIST
+from ..models.moon_model import MoonModel
 
 
 def create_model_for_dataset(dataset_name: str, model_type: str = "mini_cnn") -> Union[MiniCNN, MiniCNNMNIST, MoonModel]:

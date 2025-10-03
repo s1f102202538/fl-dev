@@ -109,13 +109,14 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-# Add parent directories to Python path for imports
+# Add parent directories to Python path for imports FIRST
 current_dir = Path(__file__).parent
 flower_dir = current_dir.parent
 fl_dir = flower_dir.parent
 sys.path.insert(0, str(fl_dir))
 
-from flower.common.dataLoader.data_loader import DataLoaderConfig, FederatedDataLoaderManager
+from flower.common._class.data_loader_config import DataLoaderConfig  # noqa: E402
+from flower.common.util.visualize_data import visualize_data_distribution  # noqa: E402
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -158,11 +159,6 @@ def parse_arguments() -> argparse.Namespace:
   parser.add_argument("--output", type=str, help="Output directory for saving visualizations")
 
   parser.add_argument("--prefix", type=str, default="data_distribution", help="Prefix for output filenames")
-
-  # Other options
-  parser.add_argument("--verbose", action="store_true", help="Enable verbose output")
-
-  parser.add_argument("--show-analysis", action="store_true", help="Show detailed data distribution analysis in console")
 
   return parser.parse_args()
 
@@ -265,22 +261,18 @@ def main():
       size_unit=args.size_unit,
     )
 
-    if args.verbose:
-      print("Configuration:")
-      print(f"  Dataset: {config.dataset_name}")
-      print(f"  Partitioner: {config.partitioner_type}")
-      print(f"  Num partitions: {args.partitions}")
-      if config.alpha and args.partitioner == "dirichlet":
-        print(f"  Alpha: {config.alpha}")
-      print(f"  Seed: {config.seed}")
-      print(f"  Size unit: {config.size_unit}")
-      if output_dir:
-        print(f"  Output dir: {output_dir}")
-      print(f"  Plot type: {config.plot_type}")
-      print()
-
-    # Create manager
-    manager = FederatedDataLoaderManager(config)
+    print("Configuration:")
+    print(f"  Dataset: {config.dataset_name}")
+    print(f"  Partitioner: {config.partitioner_type}")
+    print(f"  Num partitions: {args.partitions}")
+    if config.alpha and args.partitioner == "dirichlet":
+      print(f"  Alpha: {config.alpha}")
+    print(f"  Seed: {config.seed}")
+    print(f"  Size unit: {config.size_unit}")
+    if output_dir:
+      print(f"  Output dir: {output_dir}")
+    print(f"  Plot type: {config.plot_type}")
+    print()
 
     # Generate visualization
     print(f"\nGenerating visualization for seed {seed}...")
@@ -297,7 +289,6 @@ def main():
     for plot_type in plot_types_to_generate:
       # Update config for current plot type
       config.plot_type = plot_type
-      manager = FederatedDataLoaderManager(config)
 
       # Generate filename for current plot type
       current_filename = None
@@ -327,9 +318,8 @@ def main():
 
       try:
         print(f"  Generating {plot_type} visualization...")
-        manager.visualize_data_distribution(
-          num_partitions=args.partitions, save_path=current_filename, plot_type=plot_type, size_unit=args.size_unit, quiet=not args.show_analysis
-        )
+        if current_filename:
+          visualize_data_distribution(config, args.partitions, current_filename)
 
         if current_filename:
           if plot_type == "heatmap":
@@ -347,16 +337,6 @@ def main():
       except Exception as e:
         print(f"    ✗ Error generating {plot_type} visualization: {str(e)}")
         continue
-
-    if generated_files:
-      print(f"✓ Successfully generated visualization(s) for seed {seed}")
-      if args.verbose and generated_files:
-        print("  Generated files:")
-        for file_path in generated_files:
-          print(f"    - {file_path}")
-    else:
-      print(f"✗ No visualizations generated for seed {seed}")
-      continue
 
   # Summary
   print(f"\n{'=' * 60}")
