@@ -19,12 +19,11 @@ class DataTransformManager:
 
   def _setup_transforms(self):
     """Setup data transforms based on dataset."""
-    if "fashion_mnist" in self.config.dataset_name.lower():
+    if "zalando-datasets/fashion_mnist" in self.config.dataset_name.lower():
       normalization = ((0.1307,), (0.3081,))
       crop_size = 28
       channels = 1
-    elif "cifar" in self.config.dataset_name.lower():
-      # CIFAR-10/100 specific normalization
+    elif "uoft-cs/cifar10" in self.config.dataset_name.lower():
       normalization = ((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
       crop_size = 32
       channels = 3
