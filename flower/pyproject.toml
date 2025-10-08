@@ -25,10 +25,14 @@ serverapp = "fed.communication.server.server_app:app"
 clientapp = "fed.communication.client.client_app:app"
 
 [tool.flwr.app.config]
+model_name = "mini-cnn"
+dataset_name = "uoft-cs/cifar10"
+client_name = "fed-avg-client"
+server_name = "fed-avg-server"
+
 num-server-rounds = 10
-fraction-fit = 1.0
-fraction-evaluate = 1.0
 local-epochs = 3
+
 server-device = "cpu"
 use-wandb = false
 

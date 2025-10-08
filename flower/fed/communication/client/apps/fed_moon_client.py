@@ -7,9 +7,7 @@ import torch
 from fed.algorithms.distillation import Distillation
 from fed.algorithms.moon import MoonContrastiveLearning, MoonTrainer
 from fed.models.base_model import BaseModel
-from fed.models.moon_model import MoonModel
 from fed.task.cnn_task import CNNTask
-from fed.util.data_loader import load_data, load_public_data
 from fed.util.model_util import (
   base64_to_batch_list,
   batch_list_to_base64,
@@ -18,8 +16,7 @@ from fed.util.model_util import (
   save_model_to_state,
 )
 from flwr.client import NumPyClient
-from flwr.client.client import Client
-from flwr.common import Context, RecordDict
+from flwr.common import RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
@@ -159,26 +156,3 @@ class FedMoonClient(NumPyClient):
         "round": current_round,
       },
     )
-
-  @staticmethod
-  def client_fn(context: Context) -> Client:
-    """FedMoonクライアントインスタンスを作成"""
-    # モデルとデータの読み込み
-    net = MoonModel("mini-cnn")
-    partition_id = context.node_config["partition-id"]
-    num_partitions = context.node_config["num-partitions"]
-    train_loader, val_loader = load_data(partition_id, num_partitions)
-    public_test_data = load_public_data(batch_size=32, max_samples=1000)
-    local_epochs = context.run_config["local-epochs"]
-
-    # クライアント状態の作成
-    client_state = context.state
-
-    return FedMoonClient(
-      net=net,
-      client_state=client_state,
-      train_loader=train_loader,
-      val_loader=val_loader,
-      public_test_data=public_test_data,
-      local_epochs=local_epochs,
-    ).to_client()

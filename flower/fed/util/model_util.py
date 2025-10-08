@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import torch
-import torch.nn as nn
 from flwr.common import ArrayRecord, RecordDict, Scalar
 from flwr.common.typing import NDArrays, UserConfig
 from torch import Tensor, load, save

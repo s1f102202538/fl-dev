@@ -3,13 +3,10 @@
 import numpy as np
 import torch
 from fed.models.base_model import BaseModel
-from fed.models.mini_cnn import MiniCNN
 from fed.task.cnn_task import CNNTask
-from fed.util.data_loader import load_data
 from fed.util.model_util import get_weights, set_weights
 from flwr.client import NumPyClient
-from flwr.client.client import Client
-from flwr.common import ArrayRecord, Context, RecordDict
+from flwr.common import ArrayRecord, RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
@@ -94,19 +91,3 @@ class FedAvgClient(NumPyClient):
     self._load_layer_weights_from_state()
     loss, accuracy = CNNTask.test(self.net, self.val_loader, self.device)
     return loss, len(self.val_loader.dataset), {"accuracy": accuracy}  # type: ignore
-
-  @staticmethod
-  def client_fn(context: Context) -> Client:
-    # Load model and data
-    net = MiniCNN()
-    partition_id = context.node_config["partition-id"]
-    num_partitions = context.node_config["num-partitions"]
-    train_loader, val_loader = load_data(partition_id, num_partitions)
-    local_epochs = context.run_config["local-epochs"]
-
-    # Return Client instance
-    # We pass the state to persist information across
-    # participation rounds. Note that each client always
-    # receives the same Context instance (it's a 1:1 mapping)
-    client_state = context.state
-    return FedAvgClient(net, client_state, train_loader, val_loader, local_epochs).to_client()
