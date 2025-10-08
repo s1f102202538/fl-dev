@@ -8,9 +8,11 @@ from torch.nn.utils import clip_grad_norm_
 from torch.optim.adam import Adam
 from torch.utils.data import DataLoader
 
+from ..models.base_model import BaseModel
+
 
 class Distillation:
-  def __init__(self, studentModel: nn.Module, public_data: DataLoader, soft_targets: List[torch.Tensor]) -> None:
+  def __init__(self, studentModel: BaseModel, public_data: DataLoader, soft_targets: List[torch.Tensor]) -> None:
     self.studentModel = studentModel
     self.public_data = public_data  # 公開データセット
     self.soft_targets = soft_targets  # ソフトターゲット
@@ -59,7 +61,7 @@ class Distillation:
 
   def train_knowledge_distillation(
     self, epochs: int, learning_rate: float, T: float, soft_target_loss_weight: float, ce_loss_weight: float, device: torch.device
-  ) -> nn.Module:
+  ) -> BaseModel:
     # 損失関数と最適化アルゴリズム
     ce_loss = nn.CrossEntropyLoss()
     kl_loss = nn.KLDivLoss(reduction="batchmean")

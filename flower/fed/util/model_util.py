@@ -13,12 +13,14 @@ from flwr.common import ArrayRecord, RecordDict, Scalar
 from flwr.common.typing import NDArrays, UserConfig
 from torch import Tensor, load, save
 
+from ..models.base_model import BaseModel
 
-def get_weights(net: nn.Module) -> NDArrays:
+
+def get_weights(net: BaseModel) -> NDArrays:
   return [val.cpu().numpy() for _, val in net.state_dict().items()]
 
 
-def set_weights(net: nn.Module, parameters: NDArrays) -> None:
+def set_weights(net: BaseModel, parameters: NDArrays) -> None:
   params_dict = zip(net.state_dict().keys(), parameters)
   state_dict = OrderedDict({k: torch.tensor(v) for k, v in params_dict})
   net.load_state_dict(state_dict, strict=True)
@@ -91,7 +93,7 @@ def filter_and_calibrate_logits(logit_batches: List[Tensor], temperature: float 
 
 
 # モデル状態管理用関数
-def save_model_to_state(model: nn.Module, client_state: RecordDict, model_name: str) -> None:
+def save_model_to_state(model: BaseModel, client_state: RecordDict, model_name: str) -> None:
   """モデルの重みをclient stateに保存
 
   Args:
@@ -107,9 +109,9 @@ def save_model_to_state(model: nn.Module, client_state: RecordDict, model_name: 
 
 def load_model_from_state(
   client_state: RecordDict,
-  reference_model: nn.Module,
+  reference_model: BaseModel,
   model_name: str,
-) -> nn.Module | None:
+) -> BaseModel | None:
   """client stateからモデルの重みを読み込み
 
   Args:

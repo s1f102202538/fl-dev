@@ -4,6 +4,8 @@ from typing import Tuple
 import torch
 from torch import nn
 
+from ..models.base_model import BaseModel
+
 
 class MoonContrastiveLearning:
   """FedMoon対比学習"""
@@ -29,7 +31,7 @@ class MoonContrastiveLearning:
     self.global_model = None
     self.previous_model = None
 
-  def update_models(self, previous_model: nn.Module, global_model: nn.Module) -> None:
+  def update_models(self, previous_model: BaseModel, global_model: BaseModel) -> None:
     """グローバルモデルと前回モデルの状態を更新
 
     Args:
@@ -183,7 +185,7 @@ class MoonTrainer:
 
   def train_with_moon(
     self,
-    model: nn.Module,
+    model: BaseModel,
     train_loader,
     lr: float,
     epochs: int,
@@ -258,7 +260,7 @@ class MoonTrainer:
 
   def train_with_enhanced_moon(
     self,
-    model: nn.Module,
+    model: BaseModel,
     train_loader,
     lr: float,
     epochs: int,

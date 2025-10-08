@@ -4,6 +4,7 @@ import torch
 from datasets import load_dataset
 from fed.data.data_loader_config import DataLoaderConfig
 from fed.data.data_transform_manager import DataTransformManager
+from fed.models.base_model import BaseModel
 from fed.models.mini_cnn import MiniCNN
 from fed.task.cnn_task import CNNTask
 from fed.util.model_util import get_weights, set_weights, weighted_average
@@ -17,15 +18,11 @@ from ..strategy.fed_avg import CustomFedAvg
 
 class FedAvgServer:
   @staticmethod
-  def gen_evaluate_fn(
-    testloader: DataLoader,
-    device: torch.device,
-  ) -> Callable:
+  def gen_evaluate_fn(testloader: DataLoader, device: torch.device, net: BaseModel) -> Callable:
     """Generate the function for centralized evaluation."""
 
     def evaluate(server_round: int, parameters_ndarrays: NDArrays, config: UserConfig) -> Tuple[float, object]:
       """Evaluate global model on centralized test set."""
-      net = MiniCNN()
       set_weights(net, parameters_ndarrays)
       net.to(device)
       loss, accuracy = CNNTask.test(net, testloader, device=device)
@@ -45,6 +42,7 @@ class FedAvgServer:
   @staticmethod
   def server_fn(context: Context) -> ServerAppComponents:
     # Read from config
+    net = MiniCNN()
     num_rounds = int(context.run_config["num-server-rounds"])
     fraction_fit = context.run_config["fraction-fit"]
     fraction_eval = context.run_config["fraction-evaluate"]
@@ -75,7 +73,7 @@ class FedAvgServer:
       fraction_evaluate=fraction_eval,
       initial_parameters=parameters,
       on_fit_config_fn=FedAvgServer.on_fit_config,
-      evaluate_fn=FedAvgServer.gen_evaluate_fn(testloader, device=server_device),
+      evaluate_fn=FedAvgServer.gen_evaluate_fn(testloader, server_device, net),
       evaluate_metrics_aggregation_fn=weighted_average,
       min_fit_clients=5,
       min_evaluate_clients=5,

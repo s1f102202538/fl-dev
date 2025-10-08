@@ -3,13 +3,8 @@
 from typing import Dict, Tuple
 
 import torch
-from flwr.client import NumPyClient
-from flwr.client.client import Client
-from flwr.common import Context, RecordDict
-from flwr.common.typing import NDArrays, UserConfigValue
-from torch.utils.data import DataLoader
-
 from fed.algorithms.distillation import Distillation
+from fed.models.base_model import BaseModel
 from fed.models.mini_cnn import MiniCNN
 from fed.task.cnn_task import CNNTask
 from fed.util.data_loader import load_data, load_public_data
@@ -20,12 +15,17 @@ from fed.util.model_util import (
   load_model_from_state,
   save_model_to_state,
 )
+from flwr.client import NumPyClient
+from flwr.client.client import Client
+from flwr.common import Context, RecordDict
+from flwr.common.typing import NDArrays, UserConfigValue
+from torch.utils.data import DataLoader
 
 
 class FedKdClient(NumPyClient):
   def __init__(
     self,
-    net: MiniCNN,
+    net: BaseModel,
     client_state: RecordDict,
     train_loader: DataLoader,
     val_loader: DataLoader,
