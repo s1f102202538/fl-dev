@@ -54,6 +54,7 @@ class FedAvgServer:
 
     # Define strategy
     strategy = CustomFedAvg(
+      net=net,
       run_config=run_config,
       use_wandb=use_wandb,
       fraction_fit=1.0,

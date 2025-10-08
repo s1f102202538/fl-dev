@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Union
 
 import torch
 import wandb
-from fed.models.mini_cnn import MiniCNN
+from fed.models.base_model import BaseModel
 from fed.util.communication_cost import calculate_communication_cost, calculate_metrics_communication_cost
 from fed.util.model_util import create_run_dir, set_weights
 from flwr.common import EvaluateRes, Scalar, logger, parameters_to_ndarrays
@@ -26,10 +26,11 @@ class CustomFedAvg(FedAvg):
   results to W&B if enabled.
   """
 
-  def __init__(self, run_config: UserConfig, use_wandb: bool, *args: object, **kwargs: object) -> None:
+  def __init__(self, net: BaseModel, run_config: UserConfig, use_wandb: bool, *args: object, **kwargs: object) -> None:
     super().__init__(*args, **kwargs)  # type: ignore
 
     # Create a directory where to save results from this run
+    self.net = net
     self.save_path, self.run_dir = create_run_dir(run_config)
     self.use_wandb = use_wandb
     # Initialise W&B if set
@@ -82,7 +83,7 @@ class CustomFedAvg(FedAvg):
       # model and save the state dict.
       # Converts flwr.common.Parameters to ndarrays
       ndarrays = parameters_to_ndarrays(parameters)
-      model = MiniCNN()
+      model = self.net
       set_weights(model, ndarrays)
       # Save the PyTorch model
       file_name = f"model_state_acc_{accuracy}_round_{round}.pth"
