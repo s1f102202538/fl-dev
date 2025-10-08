@@ -30,11 +30,13 @@ dataset_name = "uoft-cs/cifar10"
 client_name = "fed-avg-client"
 server_name = "fed-avg-server"
 
+
 num-server-rounds = 10
 local-epochs = 3
 
 server-device = "cpu"
 use-wandb = false
+wandb_project_name = "fl-dev"
 
 [tool.flwr.federations]
 default = "local-simulation"

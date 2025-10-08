@@ -1,10 +1,12 @@
 import json
+import os
 from logging import WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
 import torch
 import torch.nn.functional as F
 import wandb
+from fed.util.model_util import base64_to_batch_list, batch_list_to_base64, create_run_dir
 from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, Parameters, Scalar
 from flwr.common.logger import log
 from flwr.common.typing import UserConfig
@@ -14,9 +16,7 @@ from flwr.server.strategy import Strategy
 from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor
 
-from fed.util.model_util import base64_to_batch_list, batch_list_to_base64, create_run_dir
-
-PROJECT_NAME = "fl-dev-cifer-10"
+WANDB_PROJECT_NAME = os.getenv("WANDB_PROJECT_NAME")
 
 
 class FedKD(Strategy):
@@ -36,13 +36,11 @@ class FedKD(Strategy):
     initial_parameters: Optional[Parameters] = None,
     fit_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
     evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
-    inplace: bool = True,
     run_config: UserConfig,
     use_wandb: bool = False,
     # 新しいパラメータ
     logit_temperature: float = 3.0,
     kd_temperature: float = 3.0,
-    enable_adaptive_temperature: bool = True,
     entropy_threshold: float = 0.5,
     max_history_rounds: int = 3,
   ) -> None:
@@ -57,11 +55,9 @@ class FedKD(Strategy):
     self.initial_parameters = initial_parameters
     self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
     self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
-    self.inplace = inplace
     self.avg_logits: List[Tensor] = []
 
     self.logit_temperature = logit_temperature
-    self.enable_adaptive_temperature = enable_adaptive_temperature
     self.entropy_threshold = entropy_threshold
     self.max_history_rounds = max_history_rounds
 
@@ -85,7 +81,7 @@ class FedKD(Strategy):
 
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
-    wandb.init(project=PROJECT_NAME, name=f"{str(self.run_dir)}-ServerApp-FedKD")
+    wandb.init(project=WANDB_PROJECT_NAME, name=f"{str(self.run_dir)}-ServerApp-FedKD")
 
   def _store_results(self, tag: str, results_dict: Dict) -> None:
     """Store results in dictionary, then save as JSON."""

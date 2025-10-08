@@ -1,3 +1,5 @@
+import os
+
 from fed.data.data_loader_config import DataLoaderConfig
 from flwr.common import Context
 from flwr.server import ServerApp, ServerAppComponents
@@ -11,7 +13,10 @@ def server_fn(context: Context) -> ServerAppComponents:
   model_name = str(context.run_config["model_name"])
   dataset_name = str(context.run_config["dataset_name"])
   server_name = str(context.run_config["server_name"])
+  wandb_project_name = str(context.run_config["wandb_project_name"])
   use_wandb = bool(context.run_config["use-wandb"])
+
+  os.environ["WANDB_PROJECT_NAME"] = wandb_project_name
 
   num_rounds = int(context.run_config["num-server-rounds"])
   server_device = device(str(context.run_config["server-device"]))

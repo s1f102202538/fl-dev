@@ -1,20 +1,20 @@
 """pytorch-example: A Flower / PyTorch app."""
 
 import json
+import os
 from logging import INFO
 from typing import Dict, List, Optional, Union
 
 import torch
 import wandb
+from fed.models.mini_cnn import MiniCNN
+from fed.util.model_util import create_run_dir, set_weights
 from flwr.common import EvaluateRes, Scalar, logger, parameters_to_ndarrays
 from flwr.common.typing import Parameters, UserConfig
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import FedAvg
 
-from fed.models.mini_cnn import MiniCNN
-from fed.util.model_util import create_run_dir, set_weights
-
-PROJECT_NAME = "fl-dev-cifer-10"
+WANDB_PROJECT_NAME = os.getenv("WANDB_PROJECT_NAME")
 
 
 class CustomFedAvg(FedAvg):
@@ -43,7 +43,7 @@ class CustomFedAvg(FedAvg):
 
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
-    wandb.init(project=PROJECT_NAME, name=f"{str(self.run_dir)}-ServerApp-FedAvg")
+    wandb.init(project=WANDB_PROJECT_NAME, name=f"{str(self.run_dir)}-ServerApp-FedAvg")
 
   def _store_results(self, tag: str, results_dict: Dict) -> None:
     """Store results in dictionary, then save as JSON."""
