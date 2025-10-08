@@ -82,7 +82,7 @@ class FedKD(Strategy):
 
     # 通信コスト追跡用の変数
     self.communication_costs: Dict[str, List[float]] = {
-      "server_to_client_mb": [],  # サーバーからクライアントへのロジット送信コスト
+      "server_to_client_logits_mb": [],  # サーバーからクライアントへのロジット送信コスト
       "client_to_server_metrics_mb": [],  # クライアントからサーバへのメトリクス送信コスト
       "client_to_server_logits_mb": [],  # クライアントからサーバへのロジット送信コスト
       "total_round_mb": [],  # ラウンドごとの総通信コスト
@@ -291,9 +291,7 @@ class FedKD(Strategy):
       print("[FedKD] No logits available for this round")
 
     # 通信コストを記録
-    if not hasattr(self, "communication_costs"):
-      self.communication_costs = {"server_to_client_mb": [], "client_to_server_metrics_mb": [], "client_to_server_logits_mb": [], "total_round_mb": []}
-    self.communication_costs["server_to_client_mb"].append(server_to_client_mb)
+    self.communication_costs["server_to_client_logits_mb"].append(server_to_client_mb)
 
     fit_ins = FitIns(parameters, config)
 
@@ -366,12 +364,12 @@ class FedKD(Strategy):
     self.communication_costs["client_to_server_logits_mb"].append(total_logits_mb)
 
     # ラウンドの総通信コストを計算（サーバー→クライアント + クライアント→サーバー）
-    server_to_client_mb = self.communication_costs["server_to_client_mb"][-1] if self.communication_costs["server_to_client_mb"] else 0.0
-    total_round_mb = server_to_client_mb + total_metrics_mb + total_logits_mb
+    server_to_client_logits_mb = self.communication_costs["server_to_client_logits_mb"][-1] if self.communication_costs["server_to_client_logits_mb"] else 0.0
+    total_round_mb = server_to_client_logits_mb + total_metrics_mb + total_logits_mb
     self.communication_costs["total_round_mb"].append(total_round_mb)
 
     print(
-      f"[FedKD] Round {server_round}: Server->Client: {server_to_client_mb:.4f} MB, Client->Server metrics: {total_metrics_mb:.4f} MB, logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
+      f"[FedKD] Round {server_round}: Server->Client: {server_to_client_logits_mb:.4f} MB, Client->Server metrics: {total_metrics_mb:.4f} MB, logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
     )
 
     # メトリクスの集約
@@ -386,7 +384,7 @@ class FedKD(Strategy):
       aggregated_metrics["num_aggregated_batches"] = len(self.avg_logits)
 
     # 通信コストをメトリクスに追加
-    aggregated_metrics["comm_cost_server_to_client_mb"] = server_to_client_mb
+    aggregated_metrics["comm_cost_server_to_client_mb"] = server_to_client_logits_mb
     aggregated_metrics["comm_cost_client_to_server_metrics_mb"] = total_metrics_mb
     aggregated_metrics["comm_cost_client_to_server_logits_mb"] = total_logits_mb
     aggregated_metrics["comm_cost_total_round_mb"] = total_round_mb
