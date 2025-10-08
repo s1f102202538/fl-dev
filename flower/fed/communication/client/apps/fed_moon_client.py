@@ -77,7 +77,7 @@ class FedMoonClient(NumPyClient):
 
       # 蒸留により仮想グローバルモデルを直接作成
       distillation = Distillation(
-        studentModel=self.net,  # MoonModelを直接使用
+        studentModel=copy.deepcopy(self.net),  # MoonModelを直接使用
         public_data=self.public_test_data,
         soft_targets=logits,
       )

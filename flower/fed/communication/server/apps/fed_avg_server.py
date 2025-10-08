@@ -40,13 +40,15 @@ class FedAvgServer:
     return {"lr": lr}
 
   @staticmethod
-  def create_server(model_name: str, dataset_name: str, use_wandb: bool, run_config, server_device: device, num_rounds: int) -> ServerAppComponents:
+  def create_server(
+    model_name: str, dataset_name: str, use_wandb: bool, run_config, server_device: device, num_rounds: int, data_loader_config: DataLoaderConfig
+  ) -> ServerAppComponents:
     net = create_model(model_name)
     parameters = ndarrays_to_parameters(get_weights(net))
 
     global_test_set = load_dataset(dataset_name, split="test")
     testloader = DataLoader(
-      global_test_set.with_transform(DataTransformManager(DataLoaderConfig()).apply_eval_transforms),  # type: ignore
+      global_test_set.with_transform(DataTransformManager(data_loader_config).apply_eval_transforms),  # type: ignore
       batch_size=32,
     )
 
