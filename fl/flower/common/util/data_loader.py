@@ -1,7 +1,6 @@
 from typing import Tuple
 
 from flwr.common.typing import UserConfigValue
-from flwr_datasets.partitioner import DirichletPartitioner, IidPartitioner, Partitioner
 from torch.utils.data import DataLoader
 from torchvision.transforms import (
   Compose,

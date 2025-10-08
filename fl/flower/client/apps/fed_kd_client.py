@@ -44,7 +44,7 @@ class FedKdClient(NumPyClient):
     self.public_test_data = public_test_data
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    # 前のラウンドで保存されたモデルを self.net にロードする
+    # 前ラウンドのモデルをロードする
     loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     if loaded_model is not None:
       self.net = loaded_model
@@ -57,7 +57,7 @@ class FedKdClient(NumPyClient):
       # ロジットをbase64からバッチリストに変換
       logits = base64_to_batch_list(config["avg_logits"])
 
-      # サーバーから送信された温度パラメータを取得（デフォルトは3.0）
+      # サーバーから送信された温度パラメータを取得
       temperature = float(config.get("temperature", 3.0))
 
       # 共有ロジットを使用して知識蒸留を行う
@@ -115,33 +115,6 @@ class FedKdClient(NumPyClient):
 
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
     """Evaluate model locally."""
-    # # 初回ラウンドでは avg_logits がない場合があるのでチェック
-    # if "avg_logits" in config and config["avg_logits"] is not None:
-    #   # ロジットをbase64からバッチリストに変換
-    #   logits = base64_to_batch_list(config["avg_logits"])
-
-    #   # 知識蒸留を行う
-    #   distillation = Distillation(
-    #     studentModel=self.net,
-    #     public_data=self.public_test_data,
-    #     soft_targets=logits,
-    #   )
-    #   # 知識蒸留の実行してモデルを更新
-    #   self.net = distillation.train_knowledge_distillation(
-    #     2,
-    #     learning_rate=0.001,
-    #     T=3.0,
-    #     soft_target_loss_weight=0.3,
-    #     ce_loss_weight=0.7,
-    #     device=self.device,
-    #   )
-    #   print("Lightweight knowledge distillation performed with server logits in evaluate")
-    # else:
-    #   print("No server logits available for evaluation, skipping knowledge distillation")
-
-    # # Override weights in model with those this client
-    # # had at the end of the last fit() round it participated in
-    # self._load_model_weights_from_state()
 
     # モデルをロードする
     loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
@@ -149,7 +122,7 @@ class FedKdClient(NumPyClient):
       self.net = loaded_model
       print("[DEBUG] Model loaded successfully for evaluation")
     else:
-      print("警告: 保存されたモデル状態が見つからないため、初期状態のモデルを使用します")
+      print("[Warning]: No saved model state found, using out-of-the-box model")
 
     loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
 

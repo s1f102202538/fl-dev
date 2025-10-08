@@ -1,4 +1,4 @@
-"""FedMoon with Logit Sharing: Flower / PyTorch アプリケーション"""
+"""FedMoon with Logit Sharing: Flower / PyTorch app"""
 
 import copy
 from typing import Dict, Tuple
@@ -26,11 +26,7 @@ from flower.common.task.moon import MoonContrastiveLearning, MoonTrainer
 
 
 class FedMoonClient(NumPyClient):
-  """ロジット共有機能を持つFedMoonクライアント
-
-  注意: このクライアントは一貫してMoonModelを使用します。
-  - self.net: MoonModel（MOON対比学習、訓練、評価、ロジット生成で一貫使用）
-  """
+  """ロジット共有機能を持つFedMoonクライアント"""
 
   def __init__(
     self,
@@ -42,7 +38,6 @@ class FedMoonClient(NumPyClient):
     local_epochs: UserConfigValue,
   ) -> None:
     super().__init__()
-    # MoonModelを一貫使用（蒸留、訓練、評価、ロジット生成すべて対応）
     self.net = MoonModel(out_dim=256, n_classes=10)
     self.client_state = client_state
     self.train_loader = train_loader
@@ -54,8 +49,6 @@ class FedMoonClient(NumPyClient):
 
     # モデル状態保存用の名前定義
     self.local_model_name = "fed-moon-model"
-    # 前ラウンドモデル保存用
-    self.previous_model_name = "fed-moon-previous-model"
 
     # Moon対比学習の初期化
     self.moon_learner = MoonContrastiveLearning(
@@ -74,27 +67,21 @@ class FedMoonClient(NumPyClient):
     """拡張FedMoon対比学習と適応ロジット共有によるローカルモデル訓練"""
     current_round = int(config.get("current_round", 0))
 
-    # 前ラウンドモデルを復元（対比学習用）
-    previous_round_model = load_model_from_state(self.client_state, self.net, self.previous_model_name)
-
+    previous_round_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     # 現在のローカルモデル状態を復元
-    loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
-    if loaded_model is not None:
-      self.net = loaded_model
-      print(f"ローカルモデルを復元しました (ラウンド {current_round})")
+    if previous_round_model is not None:
+      self.net = previous_round_model
+      print("[DEBUG] Previous round model loaded successfully")
     else:
-      print(f"初回ラウンドまたはモデル状態なし (ラウンド {current_round})")
-
-    virtual_global_model = None
+      print("[DEBUG] No previous model found, using initial model")
 
     if "avg_logits" in config and config["avg_logits"] is not None:
       logits = base64_to_batch_list(config["avg_logits"])
       temperature = float(config.get("temperature", 3.0))
 
-      # 蒸留により仮想グローバルモデルを直接作成（MoonModelを使用）
-      virtual_global_model = MoonModel(out_dim=256, n_classes=10)
+      # 蒸留により仮想グローバルモデルを直接作成
       distillation = Distillation(
-        studentModel=virtual_global_model,  # MoonModelを直接使用
+        studentModel=self.net,  # MoonModelを直接使用
         public_data=self.public_test_data,
         soft_targets=logits,
       )
@@ -110,55 +97,31 @@ class FedMoonClient(NumPyClient):
       )
       virtual_global_model.to(self.device)
 
-      # グローバルモデルの設定確認
-      print("=== 仮想グローバルモデル設定確認 ===")
-      print(f"virtual_global_model type: {type(virtual_global_model)}")
-      print(f"virtual_global_model.features type: {type(virtual_global_model.features)}")
-      print("蒸留によりMoonModelで直接仮想グローバルモデルを作成しました")
-      print("=== 確認完了 ===")
-
-      # Moon学習器を更新: previous_model -> 前ラウンドモデル, global_model -> 仮想グローバルモデル
       if previous_round_model is not None:
-        # previous_round_modelは既にMoonModelなので、そのまま使用
         self.moon_learner.update_models(previous_round_model, virtual_global_model)
-        print("前ラウンドモデルと仮想グローバルモデルでMoon学習器を更新しました")
+        print("Updated Moon learner with previous round model and virtual global model")
       else:
-        # 初回ラウンドの場合、現在のモデルをpreviousとして使用
         current_model_copy = copy.deepcopy(self.net)
         self.moon_learner.update_models(current_model_copy, virtual_global_model)
-        print("初回ラウンド: 現在モデルをpreviousとしてMoon学習器を初期化")
-    else:
-      # サーバーロジットがない場合（第1ラウンドまたはロジットなし）
-      if current_round == 1:
-        print("第1ラウンド: 対比学習なしで通常訓練のみ")
-        # 対比学習は無効（global_modelとprevious_modelがない）
-      else:
-        print(f"ラウンド {current_round}: サーバーロジットなし、対比学習なし")
+        print("First round: Initialized Moon learner with current model as previous")
 
-    # MOON対比学習による訓練（MoonModelを使用）
     train_loss = self.moon_trainer.train_with_enhanced_moon(
       model=self.net,
       train_loader=self.train_loader,
-      lr=0.01,  # 元論文の推奨値
-      epochs=3,  # 設定ファイルの値を使用
+      lr=0.01,
+      epochs=self.local_epochs,
       current_round=current_round,
     )
 
-    # ロジット共有用の高品質ロジット生成（MoonModelで実行）
-    # MoonModel専用のinferenceメソッドを使用（複数出力対応）
+    # MoonModel専用のinferenceメソッドを使用
     raw_logits = CNNTask.moon_inference(self.net, self.public_test_data, device=self.device)
     logit_batches = filter_and_calibrate_logits(raw_logits, temperature=1.5)
 
-    # 学習完了後のローカルモデル状態を保存（MoonModel全体）
+    # 学習完了後のローカルモデル状態を保存
     save_model_to_state(self.net, self.client_state, self.local_model_name)
 
-    # 次ラウンド用：現在のMoonModel全体を前ラウンドモデルとして保存
-    # 注意：学習前ではなく学習後のモデルを次ラウンドのprevious_modelとして使用
-    # MoonModelには投影ヘッドも含まれているため、全体を保存する必要がある
-    save_model_to_state(self.net, self.client_state, self.previous_model_name)
-
-    print(f"FedMoon拡張クライアント完了 (ラウンド {current_round})")
-    print("クライアント送信ロジット統計:", [b.mean().item() for b in logit_batches])
+    print(f"FedMoon enhanced client completed (Round {current_round})")
+    print("Client sending logit statistics:", [b.mean().item() for b in logit_batches])
 
     return (
       [],  # ロジット共有のみでパラメータ集約は行わないため空リストを返す
@@ -180,9 +143,9 @@ class FedMoonClient(NumPyClient):
     if loaded_model is not None:
       self.net = loaded_model
     else:
-      print("警告: 保存されたモデル状態が見つからないため、初期状態のモデルを使用します")
+      print("[Warning] No saved model state found, using initial model")
 
-      # MoonModel専用のテストメソッドを使用（複数出力対応）
+      # MoonModel専用のテストメソッドを使用
     loss, accuracy = CNNTask.moon_test(self.net, self.val_loader, device=self.device)
 
     # 分析用の追加メトリクス

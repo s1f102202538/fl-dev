@@ -1,5 +1,5 @@
 import json
-from logging import INFO, WARNING
+from logging import WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
 import torch

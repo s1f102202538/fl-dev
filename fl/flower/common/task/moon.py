@@ -25,7 +25,7 @@ class MoonContrastiveLearning:
     self.temperature = temperature
     self.device = device or torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-    # 対比学習のためのモデル状態
+    # 対比学習のためのモデル
     self.global_model = None
     self.previous_model = None
 
@@ -40,7 +40,6 @@ class MoonContrastiveLearning:
     if self.previous_model is None:
       self.previous_model = copy.deepcopy(previous_model)
     else:
-      # 既存モデルがある場合は状態辞書を更新
       self.previous_model.load_state_dict(previous_model.state_dict())
 
     # 前回モデルを評価モードに設定し、勾配を無効化
@@ -53,7 +52,6 @@ class MoonContrastiveLearning:
     if self.global_model is None:
       self.global_model = copy.deepcopy(global_model)
     else:
-      # 既存モデルがある場合は状態辞書を更新
       self.global_model.load_state_dict(global_model.state_dict())
 
     # グローバルモデルを評価モードに設定し、勾配を無効化
