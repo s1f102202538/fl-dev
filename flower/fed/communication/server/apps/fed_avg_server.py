@@ -1,16 +1,16 @@
 from typing import Callable, Tuple
 
-import torch
 from datasets import load_dataset
 from fed.data.data_loader_config import DataLoaderConfig
 from fed.data.data_transform_manager import DataTransformManager
 from fed.models.base_model import BaseModel
-from fed.models.mini_cnn import MiniCNN
 from fed.task.cnn_task import CNNTask
+from fed.util.create_model import create_model
 from fed.util.model_util import get_weights, set_weights, weighted_average
-from flwr.common import Context, ndarrays_to_parameters
+from flwr.common import ndarrays_to_parameters
 from flwr.common.typing import NDArrays, UserConfig
 from flwr.server import ServerAppComponents, ServerConfig
+from torch import device
 from torch.utils.data import DataLoader
 
 from ..strategy.fed_avg import CustomFedAvg
@@ -18,7 +18,7 @@ from ..strategy.fed_avg import CustomFedAvg
 
 class FedAvgServer:
   @staticmethod
-  def gen_evaluate_fn(testloader: DataLoader, device: torch.device, net: BaseModel) -> Callable:
+  def gen_evaluate_fn(testloader: DataLoader, device: device, net: BaseModel) -> Callable:
     """Generate the function for centralized evaluation."""
 
     def evaluate(server_round: int, parameters_ndarrays: NDArrays, config: UserConfig) -> Tuple[float, object]:
@@ -40,26 +40,11 @@ class FedAvgServer:
     return {"lr": lr}
 
   @staticmethod
-  def server_fn(context: Context) -> ServerAppComponents:
-    # Read from config
-    net = MiniCNN()
-    num_rounds = int(context.run_config["num-server-rounds"])
-    fraction_fit = context.run_config["fraction-fit"]
-    fraction_eval = context.run_config["fraction-evaluate"]
-    server_device = torch.device(str(context.run_config["server-device"]))
+  def create_server(model_name: str, dataset_name: str, use_wandb: bool, run_config, server_device: device, num_rounds: int) -> ServerAppComponents:
+    net = create_model(model_name)
+    parameters = ndarrays_to_parameters(get_weights(net))
 
-    # Initialize model parameters
-    ndarrays = get_weights(MiniCNN())
-    parameters = ndarrays_to_parameters(ndarrays)
-
-    # Prepare dataset for central evaluation
-
-    # This is the exact same dataset as the one downloaded by the clients via
-    # FlowerDatasets. However, we don't use FlowerDatasets for the server since
-    # partitioning is not needed.
-    # We make use of the "test" split only
-    global_test_set = load_dataset("zalando-datasets/fashion_mnist", split="test")
-
+    global_test_set = load_dataset(dataset_name, split="test")
     testloader = DataLoader(
       global_test_set.with_transform(DataTransformManager(DataLoaderConfig()).apply_eval_transforms),  # type: ignore
       batch_size=32,
@@ -67,10 +52,10 @@ class FedAvgServer:
 
     # Define strategy
     strategy = CustomFedAvg(
-      run_config=context.run_config,
-      use_wandb=bool(context.run_config["use-wandb"]),
-      fraction_fit=fraction_fit,
-      fraction_evaluate=fraction_eval,
+      run_config=run_config,
+      use_wandb=use_wandb,
+      fraction_fit=1.0,
+      fraction_evaluate=1.0,
       initial_parameters=parameters,
       on_fit_config_fn=FedAvgServer.on_fit_config,
       evaluate_fn=FedAvgServer.gen_evaluate_fn(testloader, server_device, net),
