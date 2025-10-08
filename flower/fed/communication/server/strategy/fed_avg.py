@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Union
 import torch
 import wandb
 from fed.models.mini_cnn import MiniCNN
+from fed.util.communication_cost import calculate_communication_cost, calculate_metrics_communication_cost
 from fed.util.model_util import create_run_dir, set_weights
 from flwr.common import EvaluateRes, Scalar, logger, parameters_to_ndarrays
 from flwr.common.typing import Parameters, UserConfig
@@ -40,6 +41,14 @@ class CustomFedAvg(FedAvg):
 
     # A dictionary to store results as they come
     self.results: Dict = {}
+
+    # 通信コスト追跡用の変数
+    self.communication_costs: Dict[str, List[float]] = {
+      "server_to_client_params_mb": [],  # サーバからクライアントへのパラメータ送信コスト
+      "client_to_server_params_mb": [],  # クライアントからサーバへのパラメータ送信コスト
+      "client_to_server_metrics_mb": [],  # クライアントからサーバへのメトリクス送信コスト
+      "total_round_mb": [],  # ラウンドごとの総通信コスト
+    }
 
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
@@ -91,6 +100,60 @@ class CustomFedAvg(FedAvg):
       # Log metrics to W&B
       wandb.log(results_dict, step=server_round)
 
+  def configure_fit(self, server_round: int, parameters: Parameters, client_manager) -> List:
+    """Configure the next round of training with communication cost measurement."""
+    # 送信パラメータのサイズを測定
+    comm_cost = calculate_communication_cost(parameters)
+    self.communication_costs["server_to_client_params_mb"].append(comm_cost["size_mb"])
+
+    logger.log(INFO, f"Round {server_round}: Server->Client parameters: {comm_cost['size_mb']:.4f} MB")
+
+    # 基底クラスのconfigure_fitを呼び出し
+    return super().configure_fit(server_round, parameters, client_manager)
+
+  def aggregate_fit(self, server_round: int, results, failures):
+    """Aggregate training results with communication cost measurement."""
+    # クライアントからのパラメータとメトリクスのサイズを測定
+    total_params_mb = 0.0
+    total_metrics_mb = 0.0
+
+    for _, fit_res in results:
+      # パラメータサイズ測定
+      if fit_res.parameters:
+        params_cost = calculate_communication_cost(fit_res.parameters)
+        total_params_mb += params_cost["size_mb"]
+
+      # メトリクスサイズ測定
+      if fit_res.metrics:
+        metrics_cost = calculate_metrics_communication_cost(fit_res.metrics)
+        total_metrics_mb += metrics_cost["metrics_size_mb"]
+
+    # 通信コストを記録
+    self.communication_costs["client_to_server_params_mb"].append(total_params_mb)
+    self.communication_costs["client_to_server_metrics_mb"].append(total_metrics_mb)
+
+    # ラウンドの総通信コストを計算
+    server_to_client_params_mb = self.communication_costs["server_to_client_params_mb"][-1] if self.communication_costs["server_to_client_params_mb"] else 0.0
+    total_round_mb = server_to_client_params_mb + total_params_mb + total_metrics_mb
+    self.communication_costs["total_round_mb"].append(total_round_mb)
+
+    logger.log(
+      INFO, f"Round {server_round}: Client->Server params: {total_params_mb:.4f} MB, metrics: {total_metrics_mb:.4f} MB, total: {total_round_mb:.4f} MB"
+    )
+
+    # 基底クラスのaggregate_fitを呼び出し
+    parameters, metrics = super().aggregate_fit(server_round, results, failures)
+
+    # 通信コストをメトリクスに追加
+    if metrics is not None:
+      metrics["comm_cost_server_to_client_mb"] = server_to_client_params_mb
+      metrics["comm_cost_client_to_server_params_mb"] = total_params_mb
+      metrics["comm_cost_client_to_server_metrics_mb"] = total_metrics_mb
+      metrics["comm_cost_total_round_mb"] = total_round_mb
+      metrics["comm_cost_cumulative_mb"] = sum(self.communication_costs["total_round_mb"])
+
+    return parameters, metrics
+
   def evaluate(self, server_round: int, parameters: Parameters) -> Optional[tuple[float, dict[str, Scalar]]]:
     """Run centralized evaluation if callback was passed to strategy init."""
     loss, metrics = super().evaluate(server_round, parameters)  # type: ignore
@@ -106,10 +169,16 @@ class CustomFedAvg(FedAvg):
     )
     return loss, metrics
 
+  def configure_evaluate(self, server_round: int, parameters: Parameters, client_manager):
+    """Configure the next round of evaluation."""
+    # 基底クラスのconfigure_evaluateを呼び出し
+    return super().configure_evaluate(server_round, parameters, client_manager)
+
   def aggregate_evaluate(
     self, server_round: int, results: List[tuple[ClientProxy, EvaluateRes]], failures: list[Union[tuple[ClientProxy, EvaluateRes], BaseException]]
   ) -> tuple[Optional[float], dict[str, Scalar]]:
     """Aggregate results from federated evaluation."""
+    # 基底クラスのaggregate_evaluateを呼び出し
     loss, metrics = super().aggregate_evaluate(server_round, results, failures)
 
     # Store and log federated evaluation results
