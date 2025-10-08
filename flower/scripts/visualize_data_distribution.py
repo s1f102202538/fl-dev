@@ -256,7 +256,6 @@ def main():
       partitioner_type=args.partitioner,
       alpha=args.alpha if args.partitioner == "dirichlet" else 1.0,
       seed=seed,
-      enable_visualization=True,
       plot_type=args.plot_type,
       size_unit=args.size_unit,
     )

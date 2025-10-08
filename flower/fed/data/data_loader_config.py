@@ -40,7 +40,7 @@ class DataLoaderConfig:
   """
 
   # Dataset configuration
-  dataset_name: str = "uoft-cs/cifar10"
+  dataset_name: str
 
   # Partitioner configuration
   partitioner_type: str = "dirichlet"  # "dirichlet" or "iid"
@@ -57,8 +57,6 @@ class DataLoaderConfig:
   shuffle_train: bool = True
   shuffle_test: bool = False
 
-  # Visualization configuration
-  enable_visualization: bool = False
   plot_type: str = "bar"  # "bar" or "heatmap"
   size_unit: str = "absolute"  # "absolute" or "percent"
 

@@ -22,16 +22,13 @@ class DataTransformManager:
     if "zalando-datasets/fashion_mnist" in self.config.dataset_name.lower():
       normalization = ((0.1307,), (0.3081,))
       crop_size = 28
-      channels = 1
     elif "uoft-cs/cifar10" in self.config.dataset_name.lower():
       normalization = ((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
       crop_size = 32
-      channels = 3
     else:
       # Default CIFAR-like normalization for other datasets
       normalization = ((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
       crop_size = 32
-      channels = 3
 
     self.eval_transforms = Compose([ToTensor(), Normalize(*normalization)])
     self.train_transforms = Compose(
