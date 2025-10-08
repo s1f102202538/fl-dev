@@ -2,16 +2,16 @@
 
 import numpy as np
 import torch
+from fed.models.base_model import BaseModel
+from fed.models.mini_cnn import MiniCNN
+from fed.task.cnn_task import CNNTask
+from fed.util.data_loader import load_data
+from fed.util.model_util import get_weights, set_weights
 from flwr.client import NumPyClient
 from flwr.client.client import Client
 from flwr.common import ArrayRecord, Context, RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
-
-from fed.models.mini_cnn import MiniCNN
-from fed.task.cnn_task import CNNTask
-from fed.util.data_loader import load_data
-from fed.util.model_util import get_weights, set_weights
 
 
 # Define Flower Client and client_fn
@@ -23,7 +23,7 @@ class FedAvgClient(NumPyClient):
   and updated during `fit()` and used during `evaluate()`.
   """
 
-  def __init__(self, net: MiniCNN, client_state: RecordDict, train_loader: DataLoader, val_loader: DataLoader, local_epochs: UserConfigValue) -> None:
+  def __init__(self, net: BaseModel, client_state: RecordDict, train_loader: DataLoader, val_loader: DataLoader, local_epochs: UserConfigValue) -> None:
     self.net = net
     self.client_state = client_state
     self.train_loader = train_loader
@@ -80,7 +80,7 @@ class FedAvgClient(NumPyClient):
     state_dict = self.client_state[self.local_layer_name].to_torch_state_dict()  # type: ignore
 
     # apply previously saved classification head by this client
-    self.net.fc2.load_state_dict(state_dict, strict=True)
+    self.net.fc2.load_state_dict(state_dict, strict=True)  # type: ignore
 
   def evaluate(self, parameters: list[np.ndarray], config: dict) -> tuple[float, int, dict]:
     """Evaluate the global model on the local validation set.

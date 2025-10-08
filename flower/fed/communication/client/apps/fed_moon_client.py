@@ -4,15 +4,9 @@ import copy
 from typing import Dict, Tuple
 
 import torch
-from flwr.client import NumPyClient
-from flwr.client.client import Client
-from flwr.common import Context, RecordDict
-from flwr.common.typing import NDArrays, UserConfigValue
-from torch.utils.data import DataLoader
-
 from fed.algorithms.distillation import Distillation
 from fed.algorithms.moon import MoonContrastiveLearning, MoonTrainer
-from fed.models.mini_cnn import MiniCNN
+from fed.models.base_model import BaseModel
 from fed.models.moon_model import MoonModel
 from fed.task.cnn_task import CNNTask
 from fed.util.data_loader import load_data, load_public_data
@@ -23,6 +17,11 @@ from fed.util.model_util import (
   load_model_from_state,
   save_model_to_state,
 )
+from flwr.client import NumPyClient
+from flwr.client.client import Client
+from flwr.common import Context, RecordDict
+from flwr.common.typing import NDArrays, UserConfigValue
+from torch.utils.data import DataLoader
 
 
 class FedMoonClient(NumPyClient):
@@ -30,7 +29,7 @@ class FedMoonClient(NumPyClient):
 
   def __init__(
     self,
-    net: MiniCNN,
+    net: BaseModel,
     client_state: RecordDict,
     train_loader: DataLoader,
     val_loader: DataLoader,
@@ -38,7 +37,7 @@ class FedMoonClient(NumPyClient):
     local_epochs: UserConfigValue,
   ) -> None:
     super().__init__()
-    self.net = MoonModel(out_dim=256, n_classes=10)
+    self.net = net
     self.client_state = client_state
     self.train_loader = train_loader
     self.val_loader = val_loader
@@ -114,7 +113,7 @@ class FedMoonClient(NumPyClient):
     )
 
     # MoonModel専用のinferenceメソッドを使用
-    raw_logits = CNNTask.moon_inference(self.net, self.public_test_data, device=self.device)
+    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
     logit_batches = filter_and_calibrate_logits(raw_logits, temperature=1.5)
 
     # 学習完了後のローカルモデル状態を保存
@@ -146,7 +145,7 @@ class FedMoonClient(NumPyClient):
       print("[Warning] No saved model state found, using initial model")
 
       # MoonModel専用のテストメソッドを使用
-    loss, accuracy = CNNTask.moon_test(self.net, self.val_loader, device=self.device)
+    loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
 
     # 分析用の追加メトリクス
     current_round = int(config.get("current_round", 0))
@@ -165,7 +164,7 @@ class FedMoonClient(NumPyClient):
   def client_fn(context: Context) -> Client:
     """FedMoonクライアントインスタンスを作成"""
     # モデルとデータの読み込み
-    net = MiniCNN()
+    net = MoonModel("mini-cnn")
     partition_id = context.node_config["partition-id"]
     num_partitions = context.node_config["num-partitions"]
     train_loader, val_loader = load_data(partition_id, num_partitions)
