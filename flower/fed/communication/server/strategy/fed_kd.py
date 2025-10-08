@@ -14,7 +14,7 @@ from flwr.server.strategy import Strategy
 from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor
 
-from fl.flower.common.util.model_util import base64_to_batch_list, batch_list_to_base64, create_run_dir
+from fed.util.model_util import base64_to_batch_list, batch_list_to_base64, create_run_dir
 
 PROJECT_NAME = "fl-dev-cifer-10"
 

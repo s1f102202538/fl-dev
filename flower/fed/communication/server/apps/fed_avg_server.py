@@ -7,12 +7,13 @@ from flwr.common.typing import NDArrays, UserConfig
 from flwr.server import ServerAppComponents, ServerConfig
 from torch.utils.data import DataLoader
 
-from flower.common._class.data_loader_manager import DataLoaderManager
-from flower.common._class.data_transform_manager import DataTransformManager
-from flower.common.models.mini_cnn import MiniCNN
-from flower.common.task.cnn_task import CNNTask
-from flower.common.util.model_util import get_weights, set_weights, weighted_average
-from flower.server.strategy.fed_avg import CustomFedAvg
+from fed.data.data_loader_manager import DataLoaderManager
+from fed.data.data_transform_manager import DataTransformManager
+from fed.models.mini_cnn import MiniCNN
+from fed.task.cnn_task import CNNTask
+from fed.util.model_util import get_weights, set_weights, weighted_average
+
+from ..strategy.fed_avg import CustomFedAvg
 
 
 class FedAvgServer:

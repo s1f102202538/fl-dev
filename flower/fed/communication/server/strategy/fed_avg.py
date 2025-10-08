@@ -11,8 +11,8 @@ from flwr.common.typing import Parameters, UserConfig
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import FedAvg
 
-from fl.flower.common.util.model_util import create_run_dir, set_weights
-from flower.common.models.mini_cnn import MiniCNN
+from fed.models.mini_cnn import MiniCNN
+from fed.util.model_util import create_run_dir, set_weights
 
 PROJECT_NAME = "fl-dev-cifer-10"
 

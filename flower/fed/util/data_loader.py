@@ -10,8 +10,8 @@ from torchvision.transforms import (
   ToTensor,
 )
 
-from flower.common._class.data_loader_config import DataLoaderConfig
-from flower.common._class.data_loader_manager import DataLoaderManager
+from ..data.data_loader_config import DataLoaderConfig
+from ..data.data_loader_manager import DataLoaderManager
 
 # Global variables for backward compatibility
 fds = None  # Cache FederatedDataset

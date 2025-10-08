@@ -6,10 +6,10 @@ from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import IidPartitioner
 from torch.utils.data import DataLoader
 
-from flower.common._class.data_loader_config import DataLoaderConfig
-from flower.common._class.data_transform_manager import DataTransformManager
-from flower.common._class.public_data import PublicDataset
-from flower.common.util.create_partitioner import create_partitioner
+from ..util.create_partitioner import create_partitioner
+from .data_loader_config import DataLoaderConfig
+from .data_transform_manager import DataTransformManager
+from .public_data import PublicDataset
 
 
 class DataLoaderManager:

@@ -8,10 +8,10 @@ from flwr.common import ArrayRecord, Context, RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
-from fl.flower.common.util.data_loader import load_data
-from fl.flower.common.util.model_util import get_weights, set_weights
-from flower.common.models.mini_cnn import MiniCNN
-from flower.common.task.cnn_task import CNNTask
+from fed.models.mini_cnn import MiniCNN
+from fed.task.cnn_task import CNNTask
+from fed.util.data_loader import load_data
+from fed.util.model_util import get_weights, set_weights
 
 
 # Define Flower Client and client_fn

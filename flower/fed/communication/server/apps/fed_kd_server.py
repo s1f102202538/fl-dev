@@ -1,8 +1,9 @@
 from flwr.common import Context
 from flwr.server import ServerAppComponents, ServerConfig
 
-from fl.flower.common.util.model_util import weighted_average
-from flower.server.strategy.fed_kd import FedKD
+from fed.util.model_util import weighted_average
+
+from ..strategy.fed_kd import FedKD
 
 
 class FedKDServer:

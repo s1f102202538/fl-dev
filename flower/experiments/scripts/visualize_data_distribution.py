@@ -115,8 +115,8 @@ flower_dir = current_dir.parent
 fl_dir = flower_dir.parent
 sys.path.insert(0, str(fl_dir))
 
-from flower.common._class.data_loader_config import DataLoaderConfig  # noqa: E402
-from flower.common.util.visualize_data import visualize_data_distribution  # noqa: E402
+from flower.fed.data.data_loader_config import DataLoaderConfig  # noqa: E402
+from flower.fed.util.visualize_data import visualize_data_distribution  # noqa: E402
 
 
 def parse_arguments() -> argparse.Namespace:

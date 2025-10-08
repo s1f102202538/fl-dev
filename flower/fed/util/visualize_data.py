@@ -6,8 +6,8 @@ from flwr_datasets import FederatedDataset
 from flwr_datasets.partitioner import Partitioner
 from flwr_datasets.visualization import plot_label_distributions
 
-from flower.common._class.data_loader_config import DataLoaderConfig
-from flower.common.util.create_partitioner import create_partitioner
+from ..data.data_loader_config import DataLoaderConfig
+from ..util.create_partitioner import create_partitioner
 
 
 def visualize_data_distribution(

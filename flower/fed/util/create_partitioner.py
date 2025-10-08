@@ -1,6 +1,6 @@
 from flwr_datasets.partitioner import DirichletPartitioner, IidPartitioner, Partitioner
 
-from flower.common._class.data_loader_config import DataLoaderConfig
+from ..data.data_loader_config import DataLoaderConfig
 
 
 def create_partitioner(config: DataLoaderConfig, num_partitions: int) -> Partitioner:
