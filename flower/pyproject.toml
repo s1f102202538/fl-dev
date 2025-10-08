@@ -21,8 +21,8 @@ packages = ["."]
 publisher = "shigeo"
 
 [tool.flwr.app.components]
-serverapp = "flower.server.server_app:app"
-clientapp = "flower.client.client_app:app"
+serverapp = "fed.communication.server.server_app:app"
+clientapp = "fed.communication.client.client_app:app"
 
 [tool.flwr.app.config]
 num-server-rounds = 10
@@ -30,7 +30,7 @@ fraction-fit = 1.0
 fraction-evaluate = 1.0
 local-epochs = 3
 server-device = "cpu"
-use-wandb = true
+use-wandb = false
 
 [tool.flwr.federations]
 default = "local-simulation"

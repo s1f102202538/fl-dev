@@ -2,16 +2,15 @@ from typing import Callable, Tuple
 
 import torch
 from datasets import load_dataset
-from flwr.common import Context, ndarrays_to_parameters
-from flwr.common.typing import NDArrays, UserConfig
-from flwr.server import ServerAppComponents, ServerConfig
-from torch.utils.data import DataLoader
-
-from fed.data.data_loader_manager import DataLoaderManager
+from fed.data.data_loader_config import DataLoaderConfig
 from fed.data.data_transform_manager import DataTransformManager
 from fed.models.mini_cnn import MiniCNN
 from fed.task.cnn_task import CNNTask
 from fed.util.model_util import get_weights, set_weights, weighted_average
+from flwr.common import Context, ndarrays_to_parameters
+from flwr.common.typing import NDArrays, UserConfig
+from flwr.server import ServerAppComponents, ServerConfig
+from torch.utils.data import DataLoader
 
 from ..strategy.fed_avg import CustomFedAvg
 
@@ -64,7 +63,7 @@ class FedAvgServer:
     global_test_set = load_dataset("zalando-datasets/fashion_mnist", split="test")
 
     testloader = DataLoader(
-      global_test_set.with_transform(DataTransformManager(DataLoaderManager()).apply_eval_transforms),  # type: ignore
+      global_test_set.with_transform(DataTransformManager(DataLoaderConfig()).apply_eval_transforms),  # type: ignore
       batch_size=32,
     )
 
