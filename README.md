@@ -25,4 +25,4 @@ Flower AI を使用したシュミレーション及び開発環境
 
 ## シュミレーション
 
-fl 配下の README に準拠
+flower/docs 配下の README.md に準拠
