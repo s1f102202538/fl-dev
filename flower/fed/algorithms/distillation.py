@@ -33,19 +33,17 @@ class Distillation:
       min_batches = min(expected_batches, actual_batches)
       print(f"Using first {min_batches} batches for distillation")
 
-  def _validate_and_combine_losses(
-    self, distillation_loss: torch.Tensor, student_loss: torch.Tensor, soft_target_loss_weight: float, ce_loss_weight: float
-  ) -> torch.Tensor:
+  def _validate_and_combine_losses(self, distillation_loss: torch.Tensor, student_loss: torch.Tensor, alpha: float, beta: float) -> torch.Tensor:
     """損失の検証と結合を行う
 
     Args:
-        distillation_loss: 蒸留損失
+        distillation_loss: KL蒸留損失
         student_loss: クロスエントロピー損失
-        soft_target_loss_weight: 蒸留損失の重み
-        ce_loss_weight: CE損失の重み
+        alpha: KL蒸留損失の重み (FedKD論文での α)
+        beta: CE損失の重み (FedKD論文での β, alpha + beta = 1.0推奨)
 
     Returns:
-        結合された損失（無効な場合はNone）
+        結合された損失
     """
     # NaN/Inf の確認と処理
     if torch.isnan(distillation_loss) or torch.isinf(distillation_loss):
@@ -55,16 +53,13 @@ class Distillation:
       print("Warning: Invalid student loss detected, using only distillation loss")
       loss = distillation_loss
     else:
-      loss = soft_target_loss_weight * distillation_loss + ce_loss_weight * student_loss
+      loss = alpha * distillation_loss + beta * student_loss
 
     return loss
 
-  def train_knowledge_distillation(
-    self, epochs: int, learning_rate: float, T: float, soft_target_loss_weight: float, ce_loss_weight: float, device: torch.device
-  ) -> BaseModel:
+  def train_knowledge_distillation(self, epochs: int, learning_rate: float, T: float, alpha: float, beta: float, device: torch.device) -> BaseModel:
     # 損失関数と最適化アルゴリズム
     ce_loss = nn.CrossEntropyLoss()
-    kl_loss = nn.KLDivLoss(reduction="batchmean")
     optimizer = Adam(self.studentModel.parameters(), lr=learning_rate)
 
     # 短いエポック数の場合はスケジューラを使わない
@@ -107,17 +102,9 @@ class Distillation:
 
           optimizer.zero_grad()
 
-          student_outputs = self.studentModel(inputs)
+          student_logits = self.studentModel.predict(inputs)
 
-          # MoonModelの場合は複数出力 (h, proj, y) なので分類出力のみを取得
-          if isinstance(student_outputs, tuple) and len(student_outputs) == 3:
-            # MoonModel: (h, proj, y) -> y (分類出力)
-            student_logits = student_outputs[2]
-          else:
-            # 通常のモデル: 単一出力
-            student_logits = student_outputs
-
-          # ロジットのクリッピング（型チェック済みでTensorを保証）
+          # ロジットのクリッピング
           soft_batch_clipped = torch.clamp(soft_batch, min=-20, max=20)
           if isinstance(student_logits, torch.Tensor):
             student_logits_clipped = torch.clamp(student_logits, min=-20, max=20)
@@ -125,18 +112,20 @@ class Distillation:
             raise TypeError(f"student_logits is not a Tensor: {type(student_logits)}")
 
           # 温度スケーリングされたソフトマックス
-          soft_targets_temp = F.softmax(soft_batch_clipped / T, dim=1)
-          soft_prob = F.log_softmax(student_logits_clipped / T, dim=1)
+          teacher_probs = F.softmax(soft_batch_clipped / T, dim=1)  # 教師の確率分布
+          student_log_probs = F.log_softmax(student_logits_clipped / T, dim=1)  # 生徒のlog確率分布
 
           # 数値安定性のためのクリッピング
           eps = 1e-8
-          soft_targets_temp = torch.clamp(soft_targets_temp, min=eps, max=1.0 - eps)
+          teacher_probs = torch.clamp(teacher_probs, min=eps, max=1.0 - eps)
 
-          # KL損失とCE損失の計算
-          distillation_loss = kl_loss(soft_prob, soft_targets_temp) * (T**2)
+          # KL損失: KL(teacher || student) - 教師から生徒への知識転移
+          distillation_loss = F.kl_div(student_log_probs, teacher_probs, reduction="batchmean") * (T**2)
+
+          # 生徒モデルの通常のCE損失
           student_loss = ce_loss(student_logits, labels)
 
-          loss = self._validate_and_combine_losses(distillation_loss, student_loss, soft_target_loss_weight, ce_loss_weight)
+          loss = self._validate_and_combine_losses(distillation_loss, student_loss, alpha, beta)
           # 損失を逆伝搬
           loss.backward()
 
@@ -151,8 +140,8 @@ class Distillation:
           epoch_loss = running_loss / batch_count
           if use_scheduler and scheduler is not None:
             scheduler.step(epoch_loss)
-          print(f"Knowledge Distillation Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
+          print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
         else:
-          print(f"Knowledge Distillation Epoch {epoch + 1}/{epochs}: No valid batches processed")
+          print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}: No valid batches processed")
 
     return self.studentModel

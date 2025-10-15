@@ -49,15 +49,12 @@ class FedKdClient(NumPyClient):
     else:
       print("[DEBUG] No previous model found, using initial model")
 
-    # 初回ラウンドでは avg_logits がない場合があるのでチェック
+    train_loss = 0.0  # 初期化
+    temperature = float(config.get("temperature", 3.0))  # デフォルト温度を設定
+
     if "avg_logits" in config and config["avg_logits"] is not None:
-      # ロジットをbase64からバッチリストに変換
       logits = base64_to_batch_list(config["avg_logits"])
 
-      # サーバーから送信された温度パラメータを取得
-      temperature = float(config.get("temperature", 3.0))
-
-      # 共有ロジットを使用して知識蒸留を行う
       distillation = Distillation(
         studentModel=self.net,
         public_data=self.public_test_data,
@@ -65,19 +62,16 @@ class FedKdClient(NumPyClient):
       )
       # 知識蒸留の実行してモデルを更新
       self.net = distillation.train_knowledge_distillation(
-        epochs=1,  # 蒸留エポック数を1
+        epochs=3,
         learning_rate=0.001,  # 蒸留用学習率
         T=temperature,  # サーバーから受信した温度
-        soft_target_loss_weight=0.4,  # 蒸留損失の重み
-        ce_loss_weight=0.6,  # CE損失の重み
+        alpha=0.7,  # KL蒸留損失の重み
+        beta=0.3,  # CE損失の重み
         device=self.device,
       )
-      print(f"Knowledge distillation performed with server logits (temperature: {temperature:.3f})")
-
-      # 蒸留後のモデル状態を保存
-      save_model_to_state(self.net, self.client_state, self.local_model_name)
+      print(f"Knowledge distillation completed (temperature: {temperature:.3f})")
     else:
-      print("No server logits available, skipping knowledge distillation")
+      print("No server logits available, skipping distillation")
 
     train_loss = CNNTask.train(
       self.net,
@@ -86,6 +80,7 @@ class FedKdClient(NumPyClient):
       lr=0.01,
       device=self.device,
     )
+    print(f"Client training completed with loss: {train_loss:.4f}")
 
     # モデル全体のパラメータを state に保存
     save_model_to_state(self.net, self.client_state, self.local_model_name)
@@ -95,8 +90,8 @@ class FedKdClient(NumPyClient):
     print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
 
     # ロジットのフィルタリングと較正処理
-    filtered_logits = filter_and_calibrate_logits(raw_logits, temperature=1.5)
-    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches")
+    filtered_logits = filter_and_calibrate_logits(raw_logits, temperature=temperature)
+    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches (temp: {temperature})")
 
     print("Client send logits stats:", [b.mean().item() for b in filtered_logits])
     print(f"Client training loss: {train_loss:.4f}")
