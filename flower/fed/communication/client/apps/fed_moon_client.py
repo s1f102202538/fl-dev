@@ -72,42 +72,47 @@ class FedMoonClient(NumPyClient):
     else:
       print("[DEBUG] No previous model found, using initial model")
 
-    if "avg_logits" in config and config["avg_logits"] is not None:
-      logits = base64_to_batch_list(config["avg_logits"])
-
-      # 蒸留により仮想グローバルモデルを直接作成
-      distillation = Distillation(
-        studentModel=copy.deepcopy(self.net),  # MoonModelを直接使用
-        public_data=self.public_test_data,
-        soft_targets=logits,
-      )
-
-      # MoonModelで知識蒸留を実行
-      virtual_global_model = distillation.train_knowledge_distillation(
-        epochs=3,
-        learning_rate=0.001,
-        T=temperature,
-        alpha=0.9,  # KL蒸留損失の重み
-        beta=0.1,  # CE損失の重み
+    if previous_round_model is None:
+      print("[INFO] First round: Performing normal training without Moon contrastive learning")
+      train_loss = CNNTask.train(
+        net=self.net,
+        train_loader=self.train_loader,
+        epochs=self.local_epochs,
+        lr=0.01,
         device=self.device,
       )
-      virtual_global_model.to(self.device)
+    else:
+      if "avg_logits" in config and config["avg_logits"] is not None:
+        logits = base64_to_batch_list(config["avg_logits"])
 
-      if previous_round_model is not None:
+        # 蒸留により仮想グローバルモデルを直接作成
+        distillation = Distillation(
+          studentModel=copy.deepcopy(self.net),  # MoonModelを直接使用
+          public_data=self.public_test_data,
+          soft_targets=logits,
+        )
+
+        # MoonModelで知識蒸留を実行
+        virtual_global_model = distillation.train_knowledge_distillation(
+          epochs=3,
+          learning_rate=0.001,
+          T=temperature,
+          alpha=0.9,  # KL蒸留損失の重み
+          beta=0.1,  # CE損失の重み
+          device=self.device,
+        )
+        virtual_global_model.to(self.device)
+
         self.moon_learner.update_models(previous_round_model, virtual_global_model)
         print("Updated Moon learner with previous round model and virtual global model")
-      else:
-        current_model_copy = copy.deepcopy(self.net)
-        self.moon_learner.update_models(current_model_copy, virtual_global_model)
-        print("First round: Initialized Moon learner with current model as previous")
 
-    train_loss = self.moon_trainer.train_with_enhanced_moon(
-      model=self.net,
-      train_loader=self.train_loader,
-      lr=0.01,
-      epochs=self.local_epochs,
-      current_round=current_round,
-    )
+      train_loss = self.moon_trainer.train_with_enhanced_moon(
+        model=self.net,
+        train_loader=self.train_loader,
+        lr=0.01,
+        epochs=self.local_epochs,
+        current_round=current_round,
+      )
 
     # MoonModel専用のinferenceメソッドを使用
     raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)

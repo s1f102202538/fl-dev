@@ -49,15 +49,12 @@ class FedKdClient(NumPyClient):
     else:
       print("[DEBUG] No previous model found, using initial model")
 
-    # 蒸留がある場合は蒸留のみ、ない場合は通常訓練を実行
     train_loss = 0.0  # 初期化
     temperature = float(config.get("temperature", 3.0))  # デフォルト温度を設定
 
     if "avg_logits" in config and config["avg_logits"] is not None:
-      # ロジットをbase64からバッチリストに変換
       logits = base64_to_batch_list(config["avg_logits"])
 
-      # 共有ロジットを使用して知識蒸留を行う
       distillation = Distillation(
         studentModel=self.net,
         public_data=self.public_test_data,
@@ -72,20 +69,18 @@ class FedKdClient(NumPyClient):
         beta=0.1,  # CE損失の重み
         device=self.device,
       )
-      train_loss = 0.0  # 蒸留の場合は損失を0に設定
-      print(f"Knowledge distillation performed with server logits (temperature: {temperature:.3f})")
-
-      # 蒸留後のモデル状態を保存
-      save_model_to_state(self.net, self.client_state, self.local_model_name)
+      print(f"Knowledge distillation completed (temperature: {temperature:.3f})")
     else:
-      print("No server logits available, performing standard training")
-      train_loss = CNNTask.train(
-        self.net,
-        self.train_loader,
-        self.local_epochs,
-        lr=0.01,
-        device=self.device,
-      )
+      print("No server logits available, skipping distillation")
+
+    train_loss = CNNTask.train(
+      self.net,
+      self.train_loader,
+      self.local_epochs,
+      lr=0.01,
+      device=self.device,
+    )
+    print(f"Client training completed with loss: {train_loss:.4f}")
 
     # モデル全体のパラメータを state に保存
     save_model_to_state(self.net, self.client_state, self.local_model_name)
