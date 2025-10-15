@@ -15,8 +15,6 @@ from flwr.common.typing import Parameters, UserConfig
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import FedAvg
 
-WANDB_PROJECT_NAME = os.getenv("WANDB_PROJECT_NAME")
-
 
 class CustomFedAvg(FedAvg):
   """A class that behaves like FedAvg but has extra functionality.
@@ -53,7 +51,8 @@ class CustomFedAvg(FedAvg):
 
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
-    wandb.init(project=WANDB_PROJECT_NAME, name=f"{str(self.run_dir)}-ServerApp-FedAvg")
+    wandb_project_name = os.getenv("WANDB_PROJECT_NAME", "federated-learning-default")
+    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedAvg")
 
   def _store_results(self, tag: str, results_dict: Dict) -> None:
     """Store results in dictionary, then save as JSON."""
@@ -87,7 +86,7 @@ class CustomFedAvg(FedAvg):
       set_weights(model, ndarrays)
       # Save the PyTorch model
       file_name = f"model_state_acc_{accuracy}_round_{round}.pth"
-      torch.save(model.state_dict(), self.save_path / file_name)
+      torch.save(model.state_dict(), os.path.join(self.save_path, file_name))
 
   def store_results_and_log(self, server_round: int, tag: str, results_dict: Dict) -> None:
     """A helper method that stores results and logs them to W&B if enabled."""
@@ -152,6 +151,17 @@ class CustomFedAvg(FedAvg):
       metrics["comm_cost_client_to_server_metrics_mb"] = total_metrics_mb
       metrics["comm_cost_total_round_mb"] = total_round_mb
       metrics["comm_cost_cumulative_mb"] = sum(self.communication_costs["total_round_mb"])
+
+    # 通信コストメトリクスをW&Bにログ
+    communication_metrics = {
+      "comm_cost_server_to_client_mb": server_to_client_params_mb,
+      "comm_cost_client_to_server_params_mb": total_params_mb,
+      "comm_cost_client_to_server_metrics_mb": total_metrics_mb,
+      "comm_cost_total_round_mb": total_round_mb,
+      "comm_cost_cumulative_mb": sum(self.communication_costs["total_round_mb"]),
+    }
+
+    self.store_results_and_log(server_round=server_round, tag="communication_costs", results_dict=communication_metrics)
 
     return parameters, metrics
 

@@ -17,8 +17,6 @@ from flwr.server.strategy import Strategy
 from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor
 
-WANDB_PROJECT_NAME = os.getenv("WANDB_PROJECT_NAME")
-
 
 class FedKD(Strategy):
   """Federated Knowledge Distillation (FedKD) strategy."""
@@ -90,7 +88,8 @@ class FedKD(Strategy):
 
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
-    wandb.init(project=WANDB_PROJECT_NAME, name=f"{str(self.run_dir)}-ServerApp-FedKD")
+    wandb_project_name = os.getenv("WANDB_PROJECT_NAME", "federated-learning-default")
+    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedKD")
 
   def _store_results(self, tag: str, results_dict: Dict) -> None:
     """Store results in dictionary, then save as JSON."""
@@ -389,6 +388,21 @@ class FedKD(Strategy):
     aggregated_metrics["comm_cost_client_to_server_logits_mb"] = total_logits_mb
     aggregated_metrics["comm_cost_total_round_mb"] = total_round_mb
     aggregated_metrics["comm_cost_cumulative_mb"] = sum(self.communication_costs["total_round_mb"])
+
+    # 通信コストメトリクスをW&Bにログ
+    communication_metrics = {
+      "comm_cost_server_to_client_mb": server_to_client_logits_mb,
+      "comm_cost_client_to_server_metrics_mb": total_metrics_mb,
+      "comm_cost_client_to_server_logits_mb": total_logits_mb,
+      "comm_cost_total_round_mb": total_round_mb,
+      "comm_cost_cumulative_mb": sum(self.communication_costs["total_round_mb"]),
+      "current_temperature": self.kd_temperature,
+    }
+
+    if self.avg_logits:
+      communication_metrics["num_aggregated_batches"] = len(self.avg_logits)
+
+    self.store_results_and_log(server_round=server_round, tag="communication_costs", results_dict=communication_metrics)
 
     return None, aggregated_metrics
 

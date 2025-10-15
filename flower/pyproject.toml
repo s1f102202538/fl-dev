@@ -35,8 +35,8 @@ num-server-rounds = 10
 local-epochs = 3
 
 server-device = "cpu"
-use-wandb = false
-wandb_project_name = "fl-dev"
+use-wandb = true
+wandb_project_name = "fl-dev-cifar10"
 
 [tool.flwr.federations]
 default = "local-simulation"
