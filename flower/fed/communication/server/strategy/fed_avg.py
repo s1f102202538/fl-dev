@@ -101,14 +101,22 @@ class CustomFedAvg(FedAvg):
 
   def configure_fit(self, server_round: int, parameters: Parameters, client_manager) -> List:
     """Configure the next round of training with communication cost measurement."""
+    # 基底クラスのconfigure_fitを呼び出してクライアント設定を取得
+    config_list = super().configure_fit(server_round, parameters, client_manager)
+
     # 送信パラメータのサイズを測定
     comm_cost = calculate_communication_cost(parameters)
-    self.communication_costs["server_to_client_params_mb"].append(comm_cost["size_mb"])
+    # 実際に送信される総量は (パラメータサイズ × クライアント数)
+    num_clients = len(config_list)
+    total_server_to_client_mb = comm_cost["size_mb"] * num_clients
+    self.communication_costs["server_to_client_params_mb"].append(total_server_to_client_mb)
 
-    logger.log(INFO, f"Round {server_round}: Server->Client parameters: {comm_cost['size_mb']:.4f} MB")
+    logger.log(
+      INFO,
+      f"Round {server_round}: Server->Client parameters: {comm_cost['size_mb']:.4f} MB per client, total: {total_server_to_client_mb:.4f} MB ({num_clients} clients)",
+    )
 
-    # 基底クラスのconfigure_fitを呼び出し
-    return super().configure_fit(server_round, parameters, client_manager)
+    return config_list
 
   def aggregate_fit(self, server_round: int, results, failures):
     """Aggregate training results with communication cost measurement."""

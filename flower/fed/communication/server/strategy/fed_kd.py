@@ -288,15 +288,17 @@ class FedKD(Strategy):
     else:
       print("[FedKD] No logits available for this round")
 
-    # 通信コストを記録
-    self.communication_costs["server_to_client_logits_mb"].append(server_to_client_mb)
-
-    fit_ins = FitIns(parameters, config)
-
     # 有効になっているクライアントの取得
     sample_size = int(self.fraction_fit * client_manager.num_available())
     clients = client_manager.sample(num_clients=sample_size, min_num_clients=self.min_fit_clients)
 
+    # 実際の通信コストはクライアント数を考慮
+    total_server_to_client_mb = server_to_client_mb * len(clients)
+    self.communication_costs["server_to_client_logits_mb"].append(total_server_to_client_mb)
+
+    print(f"[FedKD] Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
+
+    fit_ins = FitIns(parameters, config)
     return [(client, fit_ins) for client in clients]
 
   @override

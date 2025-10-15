@@ -24,7 +24,7 @@ class CNNTask:
         optimizer.step()
         running_loss += loss.item()
 
-    avg_train_loss = running_loss / len(train_loader)
+    avg_train_loss = running_loss / (len(train_loader) * epochs)
     return avg_train_loss
 
   @staticmethod
