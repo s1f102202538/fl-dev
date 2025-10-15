@@ -62,6 +62,7 @@ class FedMoonClient(NumPyClient):
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
     """拡張FedMoon対比学習と適応ロジット共有によるローカルモデル訓練"""
     current_round = int(config.get("current_round", 0))
+    temperature = float(config.get("temperature", 3.0))
 
     previous_round_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     # 現在のローカルモデル状態を復元
@@ -73,7 +74,6 @@ class FedMoonClient(NumPyClient):
 
     if "avg_logits" in config and config["avg_logits"] is not None:
       logits = base64_to_batch_list(config["avg_logits"])
-      temperature = float(config.get("temperature", 3.0))
 
       # 蒸留により仮想グローバルモデルを直接作成
       distillation = Distillation(
@@ -84,11 +84,11 @@ class FedMoonClient(NumPyClient):
 
       # MoonModelで知識蒸留を実行
       virtual_global_model = distillation.train_knowledge_distillation(
-        epochs=1,
+        epochs=3,
         learning_rate=0.001,
         T=temperature,
-        soft_target_loss_weight=0.4,
-        ce_loss_weight=0.6,
+        alpha=0.9,  # KL蒸留損失の重み
+        beta=0.1,  # CE損失の重み
         device=self.device,
       )
       virtual_global_model.to(self.device)
@@ -111,7 +111,7 @@ class FedMoonClient(NumPyClient):
 
     # MoonModel専用のinferenceメソッドを使用
     raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    logit_batches = filter_and_calibrate_logits(raw_logits, temperature=1.5)
+    logit_batches = filter_and_calibrate_logits(raw_logits, temperature=temperature)
 
     # 学習完了後のローカルモデル状態を保存
     save_model_to_state(self.net, self.client_state, self.local_model_name)
