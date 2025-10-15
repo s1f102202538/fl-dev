@@ -39,8 +39,8 @@ class Distillation:
     Args:
         distillation_loss: KL蒸留損失
         student_loss: クロスエントロピー損失
-        alpha: KL蒸留損失の重み (Hinton論文での α)
-        beta: CE損失の重み (Hinton論文での β)
+        alpha: KL蒸留損失の重み (FedKD論文での α)
+        beta: CE損失の重み (FedKD論文での β, alpha + beta = 1.0推奨)
 
     Returns:
         結合された損失
@@ -140,8 +140,8 @@ class Distillation:
           epoch_loss = running_loss / batch_count
           if use_scheduler and scheduler is not None:
             scheduler.step(epoch_loss)
-          print(f"Knowledge Distillation Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
+          print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
         else:
-          print(f"Knowledge Distillation Epoch {epoch + 1}/{epochs}: No valid batches processed")
+          print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}: No valid batches processed")
 
     return self.studentModel

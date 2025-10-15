@@ -65,8 +65,8 @@ class FedKdClient(NumPyClient):
         epochs=3,
         learning_rate=0.001,  # 蒸留用学習率
         T=temperature,  # サーバーから受信した温度
-        alpha=0.9,  # KL蒸留損失の重み
-        beta=0.1,  # CE損失の重み
+        alpha=0.7,  # KL蒸留損失の重み
+        beta=0.3,  # CE損失の重み
         device=self.device,
       )
       print(f"Knowledge distillation completed (temperature: {temperature:.3f})")

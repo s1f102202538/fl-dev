@@ -92,13 +92,13 @@ class FedMoonClient(NumPyClient):
           soft_targets=logits,
         )
 
-        # MoonModelで知識蒸留を実行
+        # FedKD論文に基づく知識蒸留パラメータで仮想グローバルモデルを作成
         virtual_global_model = distillation.train_knowledge_distillation(
           epochs=3,
           learning_rate=0.001,
           T=temperature,
-          alpha=0.9,  # KL蒸留損失の重み
-          beta=0.1,  # CE損失の重み
+          alpha=0.7,  # FedKD論文: KL蒸留損失の重み
+          beta=0.3,  # FedKD論文: CE損失の重み
           device=self.device,
         )
         virtual_global_model.to(self.device)
