@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Union
 import torch
 import wandb
 from fed.models.base_model import BaseModel
-from fed.util.communication_cost import calculate_communication_cost, calculate_metrics_communication_cost
+from fed.util.communication_cost import calculate_communication_cost
 from fed.util.model_util import create_run_dir, set_weights
 from flwr.common import EvaluateRes, Scalar, logger, parameters_to_ndarrays
 from flwr.common.typing import Parameters, UserConfig
@@ -45,7 +45,6 @@ class CustomFedAvg(FedAvg):
     self.communication_costs: Dict[str, List[float]] = {
       "server_to_client_params_mb": [],  # サーバからクライアントへのパラメータ送信コスト
       "client_to_server_params_mb": [],  # クライアントからサーバへのパラメータ送信コスト
-      "client_to_server_metrics_mb": [],  # クライアントからサーバへのメトリクス送信コスト
       "total_round_mb": [],  # ラウンドごとの総通信コスト
     }
 
@@ -113,9 +112,8 @@ class CustomFedAvg(FedAvg):
 
   def aggregate_fit(self, server_round: int, results, failures):
     """Aggregate training results with communication cost measurement."""
-    # クライアントからのパラメータとメトリクスのサイズを測定
+    # クライアントからのパラメータサイズを測定
     total_params_mb = 0.0
-    total_metrics_mb = 0.0
 
     for _, fit_res in results:
       # パラメータサイズ測定
@@ -123,23 +121,15 @@ class CustomFedAvg(FedAvg):
         params_cost = calculate_communication_cost(fit_res.parameters)
         total_params_mb += params_cost["size_mb"]
 
-      # メトリクスサイズ測定
-      if fit_res.metrics:
-        metrics_cost = calculate_metrics_communication_cost(fit_res.metrics)
-        total_metrics_mb += metrics_cost["metrics_size_mb"]
-
     # 通信コストを記録
     self.communication_costs["client_to_server_params_mb"].append(total_params_mb)
-    self.communication_costs["client_to_server_metrics_mb"].append(total_metrics_mb)
 
-    # ラウンドの総通信コストを計算
+    # ラウンドの総通信コストを計算（メトリクスは除外）
     server_to_client_params_mb = self.communication_costs["server_to_client_params_mb"][-1] if self.communication_costs["server_to_client_params_mb"] else 0.0
-    total_round_mb = server_to_client_params_mb + total_params_mb + total_metrics_mb
+    total_round_mb = server_to_client_params_mb + total_params_mb
     self.communication_costs["total_round_mb"].append(total_round_mb)
 
-    logger.log(
-      INFO, f"Round {server_round}: Client->Server params: {total_params_mb:.4f} MB, metrics: {total_metrics_mb:.4f} MB, total: {total_round_mb:.4f} MB"
-    )
+    logger.log(INFO, f"Round {server_round}: Client->Server params: {total_params_mb:.4f} MB, total: {total_round_mb:.4f} MB")
 
     # 基底クラスのaggregate_fitを呼び出し
     parameters, metrics = super().aggregate_fit(server_round, results, failures)
@@ -148,7 +138,6 @@ class CustomFedAvg(FedAvg):
     if metrics is not None:
       metrics["comm_cost_server_to_client_mb"] = server_to_client_params_mb
       metrics["comm_cost_client_to_server_params_mb"] = total_params_mb
-      metrics["comm_cost_client_to_server_metrics_mb"] = total_metrics_mb
       metrics["comm_cost_total_round_mb"] = total_round_mb
       metrics["comm_cost_cumulative_mb"] = sum(self.communication_costs["total_round_mb"])
 
@@ -156,7 +145,6 @@ class CustomFedAvg(FedAvg):
     communication_metrics = {
       "comm_cost_server_to_client_mb": server_to_client_params_mb,
       "comm_cost_client_to_server_params_mb": total_params_mb,
-      "comm_cost_client_to_server_metrics_mb": total_metrics_mb,
       "comm_cost_total_round_mb": total_round_mb,
       "comm_cost_cumulative_mb": sum(self.communication_costs["total_round_mb"]),
     }
