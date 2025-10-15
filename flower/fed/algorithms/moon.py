@@ -79,7 +79,7 @@ class MoonContrastiveLearning:
     return proj, outputs  # 対比学習には投影後特徴量(proj)を使用
 
   def compute_contrastive_loss(self, local_features: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
-    """ローカル、グローバル、前回モデル間の対比損失を計算
+    """ローカル、グローバル、前回モデル間の対比損失を計算（改良版）
 
     Args:
         local_features: ローカルモデルからの投影特徴量 (pro1)
@@ -101,6 +101,11 @@ class MoonContrastiveLearning:
 
     # previous_netをCPUに戻す
     self.previous_model.to("cpu")
+
+    # L2正規化
+    local_features = torch.nn.functional.normalize(local_features, p=2, dim=1)
+    global_features = torch.nn.functional.normalize(global_features, p=2, dim=1)
+    prev_features = torch.nn.functional.normalize(prev_features, p=2, dim=1)
 
     # CosineSimilarityを使用
     cos = torch.nn.CosineSimilarity(dim=-1)
@@ -126,7 +131,7 @@ class MoonContrastiveLearning:
     return contrastive_loss
 
   def compute_enhanced_contrastive_loss(self, local_features: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
-    """対比損失計算（メモリ最適化版）
+    """対比損失計算（メモリ最適化 + L2正規化版）
 
     Args:
         local_features: ローカルモデルからの投影特徴量 (pro1)
@@ -141,6 +146,11 @@ class MoonContrastiveLearning:
     with torch.no_grad():
       _, global_features, _ = self.global_model(images)  # pro2
       _, prev_features, _ = self.previous_model(images)  # pro3
+
+    # L2正規化
+    local_features = torch.nn.functional.normalize(local_features, p=2, dim=1)
+    global_features = torch.nn.functional.normalize(global_features, p=2, dim=1)
+    prev_features = torch.nn.functional.normalize(prev_features, p=2, dim=1)
 
     # CosineSimilarityを使用
     cos = torch.nn.CosineSimilarity(dim=-1)

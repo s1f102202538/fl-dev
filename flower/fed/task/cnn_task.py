@@ -19,7 +19,9 @@ class CNNTask:
         images = batch["image"]
         labels = batch["label"]
         optimizer.zero_grad()
-        loss = criterion(net(images.to(device)), labels.to(device))
+
+        outputs = net.predict(images.to(device))
+        loss = criterion(outputs, labels.to(device))
         loss.backward()
         optimizer.step()
         running_loss += loss.item()
