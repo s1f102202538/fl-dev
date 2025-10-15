@@ -40,7 +40,7 @@ class FedKD(Strategy):
     # 新しいパラメータ
     logit_temperature: float = 3.0,
     kd_temperature: float = 3.0,
-    entropy_threshold: float = 0.5,
+    entropy_threshold: float = 0.01,  # 異常に小さなロジット値に対応
     max_history_rounds: int = 3,
   ) -> None:
     self.fraction_fit = fraction_fit
@@ -117,26 +117,39 @@ class FedKD(Strategy):
   def _evaluate_logit_quality(self, logits: Tensor) -> Dict[str, float]:
     """ロジットの品質を評価する"""
     with torch.no_grad():
-      # ソフトマックス確率を計算
-      probs = F.softmax(logits / self.logit_temperature, dim=1)
+      # 数値安定性のためのクリッピング
+      logits_clipped = torch.clamp(logits, min=-20, max=20)
+
+      # 温度スケーリングなしでソフトマックス確率を計算
+      probs = F.softmax(logits_clipped, dim=1)
+
+      # 数値安定性のためeps追加
+      eps = 1e-8
+      probs = torch.clamp(probs, min=eps, max=1.0 - eps)
 
       # エントロピーを計算（不確実性の指標）
-      entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1).mean().item()
+      entropy = -torch.sum(probs * torch.log(probs), dim=1).mean().item()
 
       # 最大確率（信頼度の指標）
       max_prob = probs.max(dim=1)[0].mean().item()
 
       # ロジットの分散（多様性の指標）
-      logit_variance = logits.var(dim=1).mean().item()
+      logit_variance = logits_clipped.var(dim=1).mean().item()
 
-      # 温度調整後のエントロピー
-      temp_entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1).mean().item()
+      # 温度調整後のエントロピー（参考値）
+      temp_probs = F.softmax(logits_clipped / self.kd_temperature, dim=1)
+      temp_probs = torch.clamp(temp_probs, min=eps, max=1.0 - eps)
+      temp_entropy = -torch.sum(temp_probs * torch.log(temp_probs), dim=1).mean().item()
+
+      # 予測の鋭さ（concentration）
+      concentration = 1.0 / (entropy + eps)
 
       return {
         "entropy": entropy,
         "max_prob": max_prob,
         "logit_variance": logit_variance,
         "temp_entropy": temp_entropy,
+        "concentration": concentration,
       }
 
   def _weighted_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:

@@ -116,20 +116,21 @@ class FedMoonClient(NumPyClient):
 
     # MoonModel専用のinferenceメソッドを使用
     raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    logit_batches = filter_and_calibrate_logits(raw_logits, temperature=temperature)
+    print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
+    # ロジットのフィルタリングと較正処理
+    filtered_logits = filter_and_calibrate_logits(raw_logits)
+    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches")
 
+    print(f"Client training loss: {train_loss:.4f}")
     # 学習完了後のローカルモデル状態を保存
     save_model_to_state(self.net, self.client_state, self.local_model_name)
-
-    print(f"FedMoon enhanced client completed (Round {current_round})")
-    print("Client sending logit statistics:", [b.mean().item() for b in logit_batches])
 
     return (
       [],  # ロジット共有のみでパラメータ集約は行わないため空リストを返す
       len(self.train_loader.dataset),  # type: ignore
       {
         "train_loss": train_loss,
-        "logits": batch_list_to_base64(logit_batches),
+        "logits": batch_list_to_base64(filtered_logits),
         "current_mu": self.moon_learner.mu,
       },
     )

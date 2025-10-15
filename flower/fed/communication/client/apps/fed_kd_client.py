@@ -88,12 +88,10 @@ class FedKdClient(NumPyClient):
     # 学習済みのモデルで公開データの推論を行いロジットを取得
     raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
     print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
-
     # ロジットのフィルタリングと較正処理
-    filtered_logits = filter_and_calibrate_logits(raw_logits, temperature=temperature)
-    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches (temp: {temperature})")
+    filtered_logits = filter_and_calibrate_logits(raw_logits)
+    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches")
 
-    print("Client send logits stats:", [b.mean().item() for b in filtered_logits])
     print(f"Client training loss: {train_loss:.4f}")
 
     return (
