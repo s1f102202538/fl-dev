@@ -82,7 +82,7 @@ class CustomFedAvg(FedAvg):
       # model and save the state dict.
       # Converts flwr.common.Parameters to ndarrays
       ndarrays = parameters_to_ndarrays(parameters)
-      model = self.net
+      model = type(self.net)()
       set_weights(model, ndarrays)
       # Save the PyTorch model
       file_name = f"model_state_acc_{accuracy}_round_{round}.pth"
