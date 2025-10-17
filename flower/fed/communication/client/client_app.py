@@ -26,12 +26,12 @@ def client_fn(context: Context) -> Client:
     return FedAvgClient(net, context.state, train_loader, val_loader, local_epochs).to_client()
   elif client_name == "fed-kd-client":
     net = create_model(model_name)
-    public_test_data = load_public_data(data_loader_config, batch_size=32, max_samples=1000)
+    public_test_data = load_public_data(data_loader_config)
 
     return FedKdClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
   elif client_name == "fed-moon-client":
     net = create_model(model_name, is_moon=True)
-    public_test_data = load_public_data(data_loader_config, batch_size=32, max_samples=1000)
+    public_test_data = load_public_data(data_loader_config)
 
     return FedMoonClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
   else:

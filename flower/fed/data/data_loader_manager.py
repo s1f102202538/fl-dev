@@ -70,7 +70,7 @@ class DataLoaderManager:
 
     return train_loader, test_loader
 
-  def load_public_data(self, batch_size: Optional[int] = None, max_samples: Optional[int] = None) -> DataLoader:
+  def load_public_data(self) -> DataLoader:
     """Load public data that is common to all clients.
 
     Args:
@@ -80,8 +80,8 @@ class DataLoaderManager:
     Returns:
       DataLoader for public data
     """
-    batch_size = batch_size or self.config.batch_size
-    max_samples = max_samples or self.config.public_max_samples
+    batch_size = self.config.batch_size
+    max_samples = self.config.public_max_samples
 
     # Load the test split of dataset
     public_dataset = load_dataset(self.config.dataset_name, split=f"test[:{max_samples}]")

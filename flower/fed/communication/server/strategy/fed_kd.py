@@ -4,7 +4,6 @@ from logging import WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
 import torch
-import torch.nn.functional as F
 import wandb
 from fed.util.communication_cost import calculate_data_size_mb
 from fed.util.model_util import base64_to_batch_list, batch_list_to_base64, create_run_dir
@@ -37,10 +36,7 @@ class FedKD(Strategy):
     evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
     run_config: UserConfig,
     use_wandb: bool = False,
-    # 新しいパラメータ
-    logit_temperature: float = 3.0,
-    kd_temperature: float = 3.0,
-    entropy_threshold: float = 0.01,  # 異常に小さなロジット値に対応
+    kd_temperature: float = 1.5,
     max_history_rounds: int = 3,
   ) -> None:
     self.fraction_fit = fraction_fit
@@ -56,8 +52,6 @@ class FedKD(Strategy):
     self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
     self.avg_logits: List[Tensor] = []
 
-    self.logit_temperature = logit_temperature
-    self.entropy_threshold = entropy_threshold
     self.max_history_rounds = max_history_rounds
 
     # ロジット履歴とメトリクス
@@ -114,44 +108,6 @@ class FedKD(Strategy):
       # Log metrics to W&B
       wandb.log(results_dict, step=server_round)
 
-  def _evaluate_logit_quality(self, logits: Tensor) -> Dict[str, float]:
-    """ロジットの品質を評価する"""
-    with torch.no_grad():
-      # 数値安定性のためのクリッピング
-      logits_clipped = torch.clamp(logits, min=-20, max=20)
-
-      # 温度スケーリングなしでソフトマックス確率を計算
-      probs = F.softmax(logits_clipped, dim=1)
-
-      # 数値安定性のためeps追加
-      eps = 1e-8
-      probs = torch.clamp(probs, min=eps, max=1.0 - eps)
-
-      # エントロピーを計算（不確実性の指標）
-      entropy = -torch.sum(probs * torch.log(probs), dim=1).mean().item()
-
-      # 最大確率（信頼度の指標）
-      max_prob = probs.max(dim=1)[0].mean().item()
-
-      # ロジットの分散（多様性の指標）
-      logit_variance = logits_clipped.var(dim=1).mean().item()
-
-      # 温度調整後のエントロピー（参考値）
-      temp_probs = F.softmax(logits_clipped / self.kd_temperature, dim=1)
-      temp_probs = torch.clamp(temp_probs, min=eps, max=1.0 - eps)
-      temp_entropy = -torch.sum(temp_probs * torch.log(temp_probs), dim=1).mean().item()
-
-      # 予測の鋭さ（concentration）
-      concentration = 1.0 / (entropy + eps)
-
-      return {
-        "entropy": entropy,
-        "max_prob": max_prob,
-        "logit_variance": logit_variance,
-        "temp_entropy": temp_entropy,
-        "concentration": concentration,
-      }
-
   def _weighted_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
     """重み付きロジット集約"""
     if not logits_batch_lists:
@@ -169,7 +125,6 @@ class FedKD(Strategy):
     normalized_weights = [w / total_weight for w in client_weights]
 
     aggregated_batches = []
-    batch_quality_metrics = []
 
     for batch_idx in range(min_batches):
       batch_logits = []
@@ -179,15 +134,8 @@ class FedKD(Strategy):
         if batch_idx < len(client_batches):
           logits = client_batches[batch_idx]
 
-          # ロジットの品質をチェック
-          quality = self._evaluate_logit_quality(logits)
-
-          # 低品質のロジットを除外（エントロピーが低すぎる場合）
-          if quality["entropy"] > self.entropy_threshold:
-            batch_logits.append(logits)
-            batch_weights.append(normalized_weights[client_idx])
-          else:
-            print(f"[FedKD] Skipping low-quality logits from client {client_idx}, batch {batch_idx} (entropy: {quality['entropy']:.4f})")
+          batch_logits.append(logits)
+          batch_weights.append(normalized_weights[client_idx])
 
       if batch_logits:
         # 重み付き平均を計算
@@ -203,18 +151,9 @@ class FedKD(Strategy):
         else:
           weighted_logits = batch_logits[0]
 
-        # 集約されたロジットの品質を評価
-        aggregated_quality = self._evaluate_logit_quality(weighted_logits)
-        batch_quality_metrics.append(aggregated_quality)
-
         aggregated_batches.append(weighted_logits)
 
-    # バッチ品質メトリクスをログ出力
-    if batch_quality_metrics:
-      avg_entropy = sum(m["entropy"] for m in batch_quality_metrics) / len(batch_quality_metrics)
-      avg_max_prob = sum(m["max_prob"] for m in batch_quality_metrics) / len(batch_quality_metrics)
-      print(f"[FedKD] Aggregated logits quality - Avg entropy: {avg_entropy:.4f}, Avg max prob: {avg_max_prob:.4f}")
-
+    print(f"[FedKD] Successfully aggregated {len(aggregated_batches)} batches without quality filtering")
     return aggregated_batches
 
   def _manage_logit_history(self, new_logits: List[Tensor]) -> None:
@@ -240,7 +179,7 @@ class FedKD(Strategy):
       prev_logits = self.logit_history[-2]
 
       if len(current_logits) == len(prev_logits):
-        # 重み付き移動平均（現在のロジットを重視）
+        # 重み付き移動平均
         alpha = 0.7  # 現在のロジットの重み
         enhanced_logits = []
 
@@ -326,7 +265,7 @@ class FedKD(Strategy):
     logits_batch_lists = []
     client_weights = []
 
-    # 通信コスト測定（ロジットのみ）
+    # 通信コスト測定
     total_logits_mb = 0.0
 
     for _, fit_res in results:

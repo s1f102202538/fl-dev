@@ -78,7 +78,7 @@ class FedMoonClient(NumPyClient):
         net=self.net,
         train_loader=self.train_loader,
         epochs=self.local_epochs,
-        lr=0.01,
+        lr=0.001,
         device=self.device,
       )
     else:
@@ -109,7 +109,7 @@ class FedMoonClient(NumPyClient):
       train_loss = self.moon_trainer.train_with_enhanced_moon(
         model=self.net,
         train_loader=self.train_loader,
-        lr=0.01,
+        lr=0.001,
         epochs=self.local_epochs,
         current_round=current_round,
       )

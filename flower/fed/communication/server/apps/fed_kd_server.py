@@ -13,8 +13,6 @@ class FedKDServer:
       fraction_fit=1.0,
       fraction_evaluate=1.0,
       evaluate_metrics_aggregation_fn=weighted_average,
-      logit_temperature=4.0,
-      entropy_threshold=0.2,
       max_history_rounds=2,
     )
     config = ServerConfig(num_rounds=num_rounds)

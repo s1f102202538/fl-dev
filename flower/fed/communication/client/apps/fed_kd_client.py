@@ -77,7 +77,7 @@ class FedKdClient(NumPyClient):
       self.net,
       self.train_loader,
       self.local_epochs,
-      lr=0.01,
+      lr=0.001,
       device=self.device,
     )
     print(f"Client training completed with loss: {train_loss:.4f}")

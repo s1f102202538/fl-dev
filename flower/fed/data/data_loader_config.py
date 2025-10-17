@@ -61,4 +61,4 @@ class DataLoaderConfig:
   size_unit: str = "absolute"  # "absolute" or "percent"
 
   # Public dataset configuration
-  public_max_samples: int = 1000
+  public_max_samples: int = 5000
