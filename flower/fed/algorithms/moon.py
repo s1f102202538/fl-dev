@@ -199,7 +199,6 @@ class MoonTrainer:
     train_loader,
     lr: float,
     epochs: int,
-    current_round: int = 1,
   ) -> float:
     """FedMoon対比学習による訓練
 
@@ -208,7 +207,6 @@ class MoonTrainer:
         train_loader: 訓練データローダー
         lr: ベース学習率
         local_epochs: ローカルエポック数
-        current_round: 現在のラウンド
         distillation_performed: 蒸留が実行されたかどうか
 
     Returns:
@@ -225,7 +223,7 @@ class MoonTrainer:
       weight_decay=1e-4,  # 元論文の重み減衰
     )
 
-    print(f"[MOON] Round {current_round}: Using LR = {lr:.6f} (base={lr:.6f})")
+    print(f"[MOON] Using LR = {lr:.6f} (base={lr:.6f})")
 
     model.train()
     running_loss = 0.0
@@ -274,7 +272,6 @@ class MoonTrainer:
     train_loader,
     lr: float,
     epochs: int,
-    current_round: int = 1,
   ) -> float:
     """適応FedMoon対比学習による拡張訓練
 
@@ -283,7 +280,6 @@ class MoonTrainer:
         train_loader: 訓練データローダー
         lr: ベース学習率
         local_epochs: ローカルエポック数
-        current_round: 現在のラウンド
         distillation_performed: 蒸留が実行されたかどうか
 
     Returns:
@@ -299,7 +295,7 @@ class MoonTrainer:
       weight_decay=1e-5,
     )
 
-    print(f"[Enhanced MOON] Round {current_round}: Using LR = {lr:.6f} (base={lr:.6f})")
+    print(f"[Enhanced MOON] Using LR = {lr:.6f} (base={lr:.6f})")
 
     model.train()
     running_loss = 0.0

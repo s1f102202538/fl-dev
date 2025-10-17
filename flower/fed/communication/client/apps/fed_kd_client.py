@@ -37,26 +37,28 @@ class FedKdClient(NumPyClient):
     self.local_epochs: int = int(local_epochs)
     self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     self.net.to(self.device)
-    self.local_model_name = "full-model"
+    self.local_model_name = "local-model"
+    self.global_model_name = "global-model"
     self.public_test_data = public_test_data
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    # 前ラウンドのモデルをロードする
-    loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
-    if loaded_model is not None:
-      self.net = loaded_model
-      print("[DEBUG] Previous round model loaded successfully")
-    else:
-      print("[DEBUG] No previous model found, using initial model")
-
     train_loss = 0.0  # 初期化
-    temperature = float(config.get("temperature", 3.0))  # デフォルト温度を設定
+    temperature = float(config.get("temperature", 3.0))
 
     if "avg_logits" in config and config["avg_logits"] is not None:
+      # 蒸留には保存されたグローバルモデルを使用
+      global_model_for_distillation = load_model_from_state(self.client_state, self.net, self.global_model_name)
+      if global_model_for_distillation is not None:
+        distillation_model = global_model_for_distillation
+        print("[DEBUG] Using global model for knowledge distillation")
+      else:
+        distillation_model = self.net
+        print("[DEBUG] No saved global model found, using current model for distillation")
+
       logits = base64_to_batch_list(config["avg_logits"])
 
       distillation = Distillation(
-        studentModel=self.net,
+        studentModel=distillation_model,
         public_data=self.public_test_data,
         soft_targets=logits,
       )
@@ -69,6 +71,9 @@ class FedKdClient(NumPyClient):
         beta=0.3,  # CE損失の重み
         device=self.device,
       )
+      # 蒸留後のモデルをグローバルモデルとして保存
+      save_model_to_state(self.net, self.client_state, self.global_model_name)
+
       print(f"Knowledge distillation completed (temperature: {temperature:.3f})")
     else:
       print("No server logits available, skipping distillation")

@@ -36,7 +36,7 @@ class FedKD(Strategy):
     evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
     run_config: UserConfig,
     use_wandb: bool = False,
-    kd_temperature: float = 1.5,
+    kd_temperature: float = 3.0,
     max_history_rounds: int = 3,
   ) -> None:
     self.fraction_fit = fraction_fit
@@ -439,6 +439,11 @@ class FedKD(Strategy):
       metrics_aggregated = self.evaluate_metrics_aggregation_fn(eval_metrics)
     elif server_round == 1:  # Only log this warning once
       log(WARNING, "No evaluate_metrics_aggregation_fn provided")
+
+    # 精度情報のログ出力
+    if "accuracy" in metrics_aggregated:
+      accuracy = metrics_aggregated["accuracy"]
+      print(f"[FedKD] Round {server_round} - Accuracy: {accuracy:.4f}, Loss: {loss_aggregated:.4f}")
 
     # Store and log FedKD evaluation results
     self.store_results_and_log(
