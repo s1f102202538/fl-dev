@@ -65,7 +65,7 @@ class FedKdClient(NumPyClient):
       # 知識蒸留の実行してモデルを更新
       self.net = distillation.train_knowledge_distillation(
         epochs=3,
-        learning_rate=0.001,  # 蒸留用学習率
+        learning_rate=0.01,  # 蒸留用学習率
         T=temperature,  # サーバーから受信した温度
         alpha=0.7,  # KL蒸留損失の重み
         beta=0.3,  # CE損失の重み
@@ -82,7 +82,7 @@ class FedKdClient(NumPyClient):
       self.net,
       self.train_loader,
       self.local_epochs,
-      lr=0.001,
+      lr=0.01,
       device=self.device,
     )
     print(f"Client training completed with loss: {train_loss:.4f}")

@@ -41,19 +41,13 @@ class FedAvgClient(NumPyClient):
     # Apply weights from global models (the whole model is replaced)
     set_weights(self.net, parameters)
 
-    # Override weights in classification layer with those this client
-    # had at the end of the last fit() round it participated in
-    self._load_layer_weights_from_state()
-
     train_loss = CNNTask.train(
       self.net,
       self.train_loader,
       self.local_epochs,
-      lr=float(config["lr"]),
+      lr=0.01,
       device=self.device,
     )
-    # Save classification head to context's state to use in a future fit() call
-    self._save_layer_weights_to_state()
 
     # Return locally-trained model and metrics
     return (
@@ -62,23 +56,6 @@ class FedAvgClient(NumPyClient):
       {"train_loss": train_loss},
     )
 
-  def _save_layer_weights_to_state(self) -> None:
-    """Save last layer weights to state."""
-    arr_record = ArrayRecord(self.net.fc2.state_dict())  # type: ignore
-
-    # Add to RecordDict (replace if already exists)
-    self.client_state[self.local_layer_name] = arr_record
-
-  def _load_layer_weights_from_state(self) -> None:
-    """Load last layer weights to state."""
-    if self.local_layer_name not in self.client_state.array_records:
-      return
-
-    state_dict = self.client_state[self.local_layer_name].to_torch_state_dict()  # type: ignore
-
-    # apply previously saved classification head by this client
-    self.net.fc2.load_state_dict(state_dict, strict=True)  # type: ignore
-
   def evaluate(self, parameters: list[np.ndarray], config: dict) -> tuple[float, int, dict]:
     """Evaluate the global model on the local validation set.
 
@@ -86,8 +63,6 @@ class FedAvgClient(NumPyClient):
     last time it trained the model.
     """
     set_weights(self.net, parameters)
-    # Override weights in classification layer with those this client
-    # had at the end of the last fit() round it participated in
-    self._load_layer_weights_from_state()
+
     loss, accuracy = CNNTask.test(self.net, self.val_loader, self.device)
     return loss, len(self.val_loader.dataset), {"accuracy": accuracy}  # type: ignore
