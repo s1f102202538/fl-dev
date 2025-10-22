@@ -1,8 +1,5 @@
 from typing import Callable, Tuple
 
-from datasets import load_dataset
-from fed.data.data_loader_config import DataLoaderConfig
-from fed.data.data_transform_manager import DataTransformManager
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
 from fed.util.create_model import create_model
@@ -38,17 +35,9 @@ class FedAvgServer:
     return {"lr": lr}
 
   @staticmethod
-  def create_server(
-    model_name: str, dataset_name: str, use_wandb: bool, run_config, server_device: device, num_rounds: int, data_loader_config: DataLoaderConfig
-  ) -> ServerAppComponents:
+  def create_server(model_name: str, use_wandb: bool, run_config, server_device: device, num_rounds: int, testloader: DataLoader) -> ServerAppComponents:
     net = create_model(model_name)
     parameters = ndarrays_to_parameters(get_weights(net))
-
-    global_test_set = load_dataset(dataset_name, split="test")
-    testloader = DataLoader(
-      global_test_set.with_transform(DataTransformManager(data_loader_config).apply_eval_transforms),  # type: ignore
-      batch_size=32,
-    )
 
     # Define strategy
     strategy = CustomFedAvg(

@@ -17,8 +17,8 @@ def client_fn(context: Context) -> Client:
   local_epochs = context.run_config["local-epochs"]
   partition_id = context.node_config["partition-id"]
   num_partitions = context.node_config["num-partitions"]
-  data_loader_config = DataLoaderConfig(dataset_name=dataset_name)
-  train_loader, val_loader = load_data(data_loader_config, partition_id, num_partitions)
+  data_loader_config = DataLoaderConfig(dataset_name=dataset_name, partition_id=partition_id, num_partitions=num_partitions)
+  train_loader, val_loader = load_data(data_loader_config)
 
   if client_name == "fed-avg-client":
     net = create_model(model_name)

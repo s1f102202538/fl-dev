@@ -3,7 +3,6 @@ from typing import List
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.optim as optim
 from torch.nn.utils import clip_grad_norm_
 from torch.optim.adam import Adam
 from torch.utils.data import DataLoader
