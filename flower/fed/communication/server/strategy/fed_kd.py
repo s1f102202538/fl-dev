@@ -279,18 +279,9 @@ class FedKD(Strategy):
         # バッチリスト形式でロジットを取得
         logits_batch_list = base64_to_batch_list(str(fit_res.metrics["logits"]))
 
-        # NaN/Infを含むバッチは除外
-        filtered_batch_list = []
-        for batch in logits_batch_list:
-          if not torch.isnan(batch).any() and not torch.isinf(batch).any():
-            filtered_batch_list.append(batch)
-          else:
-            print("[FedKD] Skipped batch with NaN/Inf in logits from a client.")
-
-        if filtered_batch_list:
-          logits_batch_lists.append(filtered_batch_list)
-          # クライアントの重み（データサイズベース）
-          client_weights.append(float(fit_res.num_examples))
+        logits_batch_lists.append(logits_batch_list)
+        # クライアントの重み（データサイズベース）
+        client_weights.append(float(fit_res.num_examples))
 
     if logits_batch_lists and client_weights:
       print(f"[FedKD] Aggregating logits from {len(logits_batch_lists)} clients")

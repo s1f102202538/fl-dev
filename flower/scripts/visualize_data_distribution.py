@@ -1,108 +1,4 @@
 #!/usr/bin/env python3
-"""
-Dataset Distribution Visualization Script for Federated Learning
-
-This script provides a command-line interface for visualizing data distribution
-across federated partitions using various partitioners and datasets.
-
-=== PARTITIONER TYPES EXPLAINED ===
-
-1. IID (Independent and Identically Distributed):
-   - Each client has the same distribution across all classes
-   - All clients have roughly equal amounts of each class
-   - Example: Each client has ~10% of each class (0-9)
-   - Realistic: NO - Real federated environments are rarely this balanced
-   - Use case: Baseline comparisons, initial algorithm testing
-
-2. Dirichlet Partitioner:
-   - Each client has different class distributions based on Dirichlet distribution
-   - Controlled by alpha (α) parameter for heterogeneity level
-   - Example: Client 1 has 80% class 0, Client 2 has 70% class 5, etc.
-   - Realistic: YES - Models real-world federated scenarios
-
-   Alpha Parameter Effects:
-   - α = ∞     : IID-like (uniform distribution)
-   - α = 10.0  : Low heterogeneity (mild imbalance)
-   - α = 1.0   : Moderate heterogeneity (noticeable imbalance)
-   - α = 0.5   : High heterogeneity (significant imbalance)
-   - α = 0.1   : Very high heterogeneity (extreme imbalance)
-   - α = 0.01  : Extreme heterogeneity (almost single-class clients)
-
-=== SAMPLE USAGE EXAMPLES ===
-
-# Basic IID visualization (uniform distribution)
-python visualize_data_distribution.py --partitioner iid --partitions 4 --output results/
-
-# Moderate heterogeneity (good for general FL research)
-python visualize_data_distribution.py --partitioner dirichlet --alpha 1.0 --partitions 5 --output results/
-
-# High heterogeneity (realistic federated scenario)
-python visualize_data_distribution.py --partitioner dirichlet --alpha 0.1 --partitions 8 --output results/
-
-# Compare multiple random seeds
-python visualize_data_distribution.py --seeds 42 123 456 --alpha 0.5 --partitions 4 --output comparison/
-
-# Generate bar plots instead of both (bar + heatmap)
-python visualize_data_distribution.py --plot-type bar --partitioner dirichlet --alpha 0.3 --partitions 6
-
-# Generate only heatmaps
-python visualize_data_distribution.py --plot-type heatmap --partitioner dirichlet --alpha 0.3 --partitions 6
-
-# Generate both bar and heatmap (default behavior)
-python visualize_data_distribution.py --partitioner dirichlet --alpha 0.3 --partitions 6
-
-# Show detailed analysis in console
-python visualize_data_distribution.py --alpha 0.1 --partitions 4 --show-analysis
-
-# Different datasets (all available from Hugging Face Hub)
-python visualize_data_distribution.py --dataset "uoft-cs/cifar10" --alpha 0.5 --partitions 10
-python visualize_data_distribution.py --dataset "ylecun/mnist" --alpha 0.3 --partitions 8
-python visualize_data_distribution.py --dataset "uoft-cs/cifar100" --alpha 0.1 --partitions 12
-
-=== SUPPORTED DATASETS ===
-
-All datasets from Hugging Face Hub are supported! Common examples:
-- zalando-datasets/fashion_mnist (default)
-- ylecun/mnist
-- uoft-cs/cifar10
-- uoft-cs/cifar100
-- zh-plus/tiny-imagenet
-- flwrlabs/femnist
-- ufldl-stanford/svhn
-- And thousands more at https://huggingface.co/datasets
-
-To test dataset compatibility:
-python fl/flower/scripts/test_datasets.py --dataset "your-dataset-name"
-python fl/flower/scripts/test_datasets.py --list-common
-
-=== FEDERATED LEARNING IMPLICATIONS ===
-
-IID Environment:
-+ Fast convergence (all clients learn similarly)
-+ Good generalization performance
-+ Easy to achieve consensus
-- Unrealistic assumption for real federated settings
-- Overestimates algorithm performance
-
-Non-IID Environment (Dirichlet with low α):
-+ Realistic simulation of federated environments
-+ Better evaluation of algorithm robustness
-+ Identifies client drift and convergence issues
-- Slower convergence requiring advanced FL algorithms
-- May need techniques like FedProx, FedNova, SCAFFOLD
-- Communication overhead increases
-
-Recommended α values for research:
-- α = 1.0   : Balanced research setting
-- α = 0.5   : Challenging but manageable
-- α = 0.1   : High difficulty, realistic scenario
-- α = 0.01  : Extreme scenario for stress testing
-
-Usage:
-    python visualize_data_distribution.py --help
-    python visualize_data_distribution.py --partitions 4 --alpha 0.5 --output results/
-    python visualize_data_distribution.py --partitioner iid --partitions 10 --plot-type bar
-"""
 
 import argparse
 import sys
@@ -126,7 +22,7 @@ def parse_arguments() -> argparse.Namespace:
   )
 
   # Dataset configuration
-  parser.add_argument("--dataset", type=str, default="zalando-datasets/fashion_mnist", help="Dataset to use for visualization")
+  parser.add_argument("--dataset", type=str, default="uoft-cs/cifar10", help="Dataset to use for visualization")
 
   # Partitioner configuration
   parser.add_argument("--partitioner", type=str, choices=["dirichlet", "iid"], default="dirichlet", help="Partitioner type to use")
@@ -186,40 +82,6 @@ def generate_filename(
 
 
 def main():
-  """Main function to run the visualization script.
-
-  This function demonstrates different federated data partitioning scenarios:
-
-  EXAMPLE SCENARIOS:
-
-  1. IID Scenario (Unrealistic but baseline):
-     - All clients have balanced class distributions
-     - Quick convergence but not realistic
-     - Command: --partitioner iid --partitions 4
-
-  2. Moderate Non-IID (Research standard):
-     - Some heterogeneity but manageable
-     - Good balance between realism and tractability
-     - Command: --partitioner dirichlet --alpha 1.0 --partitions 4
-
-  3. High Non-IID (Realistic scenario):
-     - Significant data heterogeneity across clients
-     - Models real federated environments
-     - Command: --partitioner dirichlet --alpha 0.1 --partitions 4
-
-  4. Extreme Non-IID (Stress testing):
-     - Each client has very few classes
-     - Tests algorithm robustness limits
-     - Command: --partitioner dirichlet --alpha 0.01 --partitions 8
-
-  OUTPUT FILES:
-  By default (both), the following files are generated:
-  Bar plot:
-  - *_bar.png: Bar chart showing data distribution per partition
-  Heatmap (generates 2 files):
-  - *_heatmap_absolute.png: Raw data counts per client/class
-  - *_heatmap_percentage.png: Percentage distribution per client
-  """
   args = parse_arguments()
 
   # Parse seeds
@@ -240,17 +102,6 @@ def main():
     print(f"Processing seed {seed} ({i}/{len(seeds_to_process)})")
     print(f"{'=' * 60}")
 
-    # Create DataLoader configuration
-    # This demonstrates how different partitioner settings affect data distribution:
-    #
-    # For IID: All clients get roughly equal samples from each class
-    # Result: partition_0: [10%, 10%, 10%, ...], partition_1: [10%, 10%, 10%, ...]
-    #
-    # For Dirichlet α=1.0: Moderate heterogeneity
-    # Result: partition_0: [15%, 8%, 12%, ...], partition_1: [5%, 18%, 9%, ...]
-    #
-    # For Dirichlet α=0.1: High heterogeneity (realistic FL scenario)
-    # Result: partition_0: [45%, 2%, 0%, ...], partition_1: [1%, 67%, 3%, ...]
     config = DataLoaderConfig(
       dataset_name=args.dataset,
       partitioner_type=args.partitioner,

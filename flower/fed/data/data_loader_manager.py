@@ -83,8 +83,7 @@ class DataLoaderManager:
     batch_size = self.config.batch_size
     max_samples = self.config.public_max_samples
 
-    # Load the test split of dataset
-    public_dataset = load_dataset(self.config.dataset_name, split=f"test[:{max_samples}]")
+    public_dataset = load_dataset(self.config.dataset_name, split=f"test[-{max_samples}:]")
 
     # Create a PyTorch Dataset wrapper with transforms
     public_dataset_wrapped = PublicDataset(public_dataset, transform=self.transform_manager.eval_transforms)
