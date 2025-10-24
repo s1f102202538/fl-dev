@@ -49,7 +49,7 @@ class FedMoonClient(NumPyClient):
 
     # Moon対比学習の初期化
     self.moon_learner = MoonContrastiveLearning(
-      mu=1.0,
+      mu=5.0,
       temperature=0.5,
       device=self.device,
     )
@@ -59,6 +59,9 @@ class FedMoonClient(NumPyClient):
       moon_learner=self.moon_learner,
       device=self.device,
     )
+
+    # 前回モデルの履歴
+    self.previous_models = []
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
     """拡張FedMoon対比学習と適応ロジット共有によるローカルモデル訓練"""
@@ -77,7 +80,7 @@ class FedMoonClient(NumPyClient):
         net=self.net,
         train_loader=self.train_loader,
         epochs=self.local_epochs,
-        lr=0.001,
+        lr=0.01,
         device=self.device,
       )
     else:
@@ -103,7 +106,7 @@ class FedMoonClient(NumPyClient):
         # FedKD論文に基づく知識蒸留パラメータで仮想グローバルモデルを作成
         virtual_global_model = distillation.train_knowledge_distillation(
           epochs=3,
-          learning_rate=0.001,
+          learning_rate=0.01,
           T=temperature,
           alpha=0.7,  # FedKD論文: KL蒸留損失の重み
           beta=0.3,  # FedKD論文: CE損失の重み
@@ -118,15 +121,23 @@ class FedMoonClient(NumPyClient):
         save_model_to_state(virtual_global_model, self.client_state, self.global_model_name)
         print("[DEBUG] Distilled model saved as global model")
 
-        self.moon_learner.update_models(previous_round_model, virtual_global_model)
-        print("Updated Moon learner with previous round model and virtual global model")
+        # Moon対比学習の前回モデルを更新
+        self.previous_models.append(previous_round_model)
+        # モデル履歴の管理
+        if len(self.previous_models) > 3:  # 最大3つの前回モデルを保持
+          self.previous_models.pop(0)
+
+        self.moon_learner.update_models(self.previous_models, virtual_global_model)
+        print(f"Updated Moon learner with {len(self.previous_models)} previous models and virtual global model")
 
       # グローバルモデル を moon 学習の起点にする
-      train_loss = self.moon_trainer.train_with_enhanced_moon(
+      train_loss = self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
-        lr=0.001,
+        lr=0.01,
         epochs=self.local_epochs,
+        args_optimizer="sgd",  # 元論文準拠
+        weight_decay=1e-4,  # 元論文準拠
       )
 
     # 学習完了後のローカルモデル状態を保存

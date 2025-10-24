@@ -15,22 +15,40 @@ def client_fn(context: Context) -> Client:
   client_name = str(context.run_config["client_name"])
   dataset_name = str(context.run_config["dataset_name"])
   local_epochs = context.run_config["local-epochs"]
-  partition_id = context.node_config["partition-id"]
-  num_partitions = context.node_config["num-partitions"]
+  partition_id = int(context.node_config["partition-id"])
+  num_partitions = int(context.node_config["num-partitions"])
+
+  # MOONパラメータ（オプション）
+  out_dim = int(context.run_config.get("out_dim", 256))
+  n_classes = int(context.run_config.get("n_classes", 10))
+  use_projection_head = bool(context.run_config.get("use_projection_head", True))
+
+  # 統一されたモデルを使用するかどうか
+  unified_model = context.run_config.get("unified_model", False)
+
   data_loader_config = DataLoaderConfig(dataset_name=dataset_name, partition_id=partition_id, num_partitions=num_partitions)
   train_loader, val_loader = load_data(data_loader_config)
 
   if client_name == "fed-avg-client":
-    net = create_model(model_name)
+    # 統一されたモデルを使用する場合（projection headなし）
+    if unified_model:
+      net = create_model(model_name, is_moon=False, out_dim=out_dim, n_classes=n_classes, use_projection_head=False, unified_model=True)
+    else:
+      net = create_model(model_name)
 
     return FedAvgClient(net, context.state, train_loader, val_loader, local_epochs).to_client()
   elif client_name == "fed-kd-client":
-    net = create_model(model_name)
+    # 統一されたモデルを使用する場合（projection headなし）
+    if unified_model:
+      net = create_model(model_name, is_moon=False, out_dim=out_dim, n_classes=n_classes, use_projection_head=False, unified_model=True)
+    else:
+      net = create_model(model_name)
     public_test_data = load_public_data(data_loader_config)
 
     return FedKdClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
   elif client_name == "fed-moon-client":
-    net = create_model(model_name, is_moon=True)
+    # MOON用パラメータを渡す
+    net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=use_projection_head)
     public_test_data = load_public_data(data_loader_config)
 
     return FedMoonClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
