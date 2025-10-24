@@ -23,6 +23,8 @@ class DataLoaderConfig:
         alpha=0.1,  # Very heterogeneous training data
         seed=42,
         batch_size=64,
+        eval_test_samples=3000,  # Custom evaluation dataset size
+        public_max_samples=2000,  # Custom public dataset size
         enable_visualization=True,
         plot_type="heatmap"
     )
@@ -41,6 +43,10 @@ class DataLoaderConfig:
 
   # Dataset configuration
   dataset_name: str
+
+  # Federated learning configuration (optional for test-only usage)
+  partition_id: int = 0
+  num_partitions: int = 1
 
   # Partitioner configuration
   partitioner_type: str = "dirichlet"  # "dirichlet" or "iid"
@@ -61,4 +67,7 @@ class DataLoaderConfig:
   size_unit: str = "absolute"  # "absolute" or "percent"
 
   # Public dataset configuration
-  public_max_samples: int = 1000
+  public_max_samples: int = 5000
+
+  # Evaluation dataset configuration
+  eval_test_samples: int = 1000  # Number of test samples for evaluation

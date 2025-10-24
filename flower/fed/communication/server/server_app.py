@@ -1,6 +1,7 @@
 import os
 
 from fed.data.data_loader_config import DataLoaderConfig
+from fed.util.data_loader import load_test_data
 from flwr.common import Context
 from flwr.server import ServerApp, ServerAppComponents
 from torch import device
@@ -23,8 +24,10 @@ def server_fn(context: Context) -> ServerAppComponents:
 
   data_loader_config = DataLoaderConfig(dataset_name=dataset_name)
 
+  testloader = load_test_data(data_loader_config)
+
   if server_name == "fed-avg-server":
-    return FedAvgServer.create_server(model_name, dataset_name, use_wandb, context.run_config, server_device, num_rounds, data_loader_config)
+    return FedAvgServer.create_server(model_name, use_wandb, context.run_config, server_device, num_rounds, testloader)
   elif server_name == "fed-kd-server":
     return FedKDServer.create_server(use_wandb, context.run_config, num_rounds)
   else:

@@ -37,38 +37,43 @@ class FedKdClient(NumPyClient):
     self.local_epochs: int = int(local_epochs)
     self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     self.net.to(self.device)
-    self.local_model_name = "full-model"
+    self.local_model_name = "local-model"
+    self.global_model_name = "global-model"
     self.public_test_data = public_test_data
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    # 前ラウンドのモデルをロードする
-    loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
-    if loaded_model is not None:
-      self.net = loaded_model
-      print("[DEBUG] Previous round model loaded successfully")
-    else:
-      print("[DEBUG] No previous model found, using initial model")
-
     train_loss = 0.0  # 初期化
-    temperature = float(config.get("temperature", 3.0))  # デフォルト温度を設定
+    temperature = float(config.get("temperature", 3.0))
 
     if "avg_logits" in config and config["avg_logits"] is not None:
+      # 蒸留には保存されたグローバルモデルを使用
+      global_model_for_distillation = load_model_from_state(self.client_state, self.net, self.global_model_name)
+      if global_model_for_distillation is not None:
+        distillation_model = global_model_for_distillation
+        print("[DEBUG] Using global model for knowledge distillation")
+      else:
+        distillation_model = self.net
+        print("[DEBUG] No saved global model found, using current model for distillation")
+
       logits = base64_to_batch_list(config["avg_logits"])
 
       distillation = Distillation(
-        studentModel=self.net,
+        studentModel=distillation_model,
         public_data=self.public_test_data,
         soft_targets=logits,
       )
       # 知識蒸留の実行してモデルを更新
       self.net = distillation.train_knowledge_distillation(
         epochs=3,
-        learning_rate=0.001,  # 蒸留用学習率
+        learning_rate=0.01,  # 蒸留用学習率
         T=temperature,  # サーバーから受信した温度
         alpha=0.7,  # KL蒸留損失の重み
         beta=0.3,  # CE損失の重み
         device=self.device,
       )
+      # 蒸留後のモデルをグローバルモデルとして保存
+      save_model_to_state(self.net, self.client_state, self.global_model_name)
+
       print(f"Knowledge distillation completed (temperature: {temperature:.3f})")
     else:
       print("No server logits available, skipping distillation")
@@ -88,12 +93,10 @@ class FedKdClient(NumPyClient):
     # 学習済みのモデルで公開データの推論を行いロジットを取得
     raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
     print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
-
     # ロジットのフィルタリングと較正処理
-    filtered_logits = filter_and_calibrate_logits(raw_logits, temperature=temperature)
-    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches (temp: {temperature})")
+    filtered_logits = filter_and_calibrate_logits(raw_logits)
+    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches")
 
-    print("Client send logits stats:", [b.mean().item() for b in filtered_logits])
     print(f"Client training loss: {train_loss:.4f}")
 
     return (

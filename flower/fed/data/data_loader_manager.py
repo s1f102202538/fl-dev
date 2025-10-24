@@ -1,9 +1,8 @@
-from typing import Optional, Tuple
+import os
+from pathlib import Path
 
 from datasets import load_dataset
-from flwr.common.typing import UserConfigValue
 from flwr_datasets import FederatedDataset
-from flwr_datasets.partitioner import IidPartitioner
 from torch.utils.data import DataLoader
 
 from ..util.create_partitioner import create_partitioner
@@ -11,89 +10,162 @@ from .data_loader_config import DataLoaderConfig
 from .data_transform_manager import DataTransformManager
 from .public_data import PublicDataset
 
+# Ensure Hugging Face Datasets cache directory exists
+CACHE_DIR = Path.home() / ".cache" / "huggingface" / "datasets"
+CACHE_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["HF_DATASETS_CACHE"] = str(CACHE_DIR)
+
 
 class DataLoaderManager:
-  def __init__(self, config: DataLoaderConfig):
-    """Initialize the federated data loader manager.
+  # Class variables for dataset caching (memory shared)
+  _dataset_cache = {}
+  _preloading_done = set()  # Preloading completion flags
+
+  @classmethod
+  def _preload_dataset_once(cls, dataset_name: str):
+    """Preload dataset once to avoid API rate limiting."""
+    if dataset_name in cls._preloading_done:
+      return
+
+    print(f"Starting initial preload for dataset '{dataset_name}'...")
+
+    try:
+      # Preload basic splits
+      splits_to_preload = ["train", "test"]
+
+      for split in splits_to_preload:
+        cache_key = f"{dataset_name}:{split}"
+        if cache_key not in cls._dataset_cache:
+          print(f"  Downloading {split} data...")
+          # Explicitly specify cache directory
+          cls._dataset_cache[cache_key] = load_dataset(dataset_name, split=split, cache_dir=str(CACHE_DIR))
+          print(f"  Loaded {split}: {len(cls._dataset_cache[cache_key])} samples")
+      cls._preloading_done.add(dataset_name)
+      print(f"Dataset '{dataset_name}' preloading completed!")
+
+    except Exception as e:
+      print(f"Error during preloading (continuing execution): {e}")
+      # Set flag even on error to prevent duplicate attempts
+      cls._preloading_done.add(dataset_name)
+
+  @classmethod
+  def _get_cached_dataset(cls, dataset_name: str, split: str):
+    """Get cached dataset with automatic initial preloading."""
+    # Preload entire dataset on first access only
+    cls._preload_dataset_once(dataset_name)
+
+    cache_key = f"{dataset_name}:{split}"
+
+    if cache_key not in cls._dataset_cache:
+      print(f"Downloading additional dataset: {cache_key}")
+      cls._dataset_cache[cache_key] = load_dataset(dataset_name, split=split, cache_dir=str(CACHE_DIR))
+    else:
+      print(f"Using cached dataset: {cache_key}")
+
+    return cls._dataset_cache[cache_key]
+
+  @staticmethod
+  def _validate_config(config: DataLoaderConfig) -> int:
+    """Validate configuration and return total test samples.
 
     Args:
-      config: DataLoaderConfig instance. If None, uses default configuration.
-    """
-    self.config = config
-    self.transform_manager = DataTransformManager(self.config)
-    self.fds: Optional[FederatedDataset] = None
-
-  def _initialize_federated_dataset(self, num_partitions: int):
-    """Initialize FederatedDataset if not already done."""
-    if self.fds is None:
-      train_partitioner = create_partitioner(self.config, num_partitions)
-      test_partitioner = IidPartitioner(num_partitions=num_partitions)  # Always IID for test data
-
-      self.fds = FederatedDataset(
-        dataset=self.config.dataset_name,
-        partitioners={"train": train_partitioner, "test": test_partitioner},
-      )
-
-  def load_data(
-    self,
-    partition_id: UserConfigValue,
-    num_partitions: UserConfigValue,
-  ) -> Tuple[DataLoader, DataLoader]:
-    """Load partition data for federated learning.
-
-    Args:
-      partition_id: ID of the partition to load
-      num_partitions: Total number of partitions
+      config: DataLoaderConfig instance
 
     Returns:
-      Tuple of (train_loader, test_loader)
+      Total number of test samples available
+
+    Raises:
+      ValueError: If configuration is invalid
     """
-    num_partitions_int = int(num_partitions)
-    partition_id_int = int(partition_id)
+    # Load dataset to check available samples (using cache)
+    full_test_dataset = DataLoaderManager._get_cached_dataset(config.dataset_name, "test")
+    total_test_samples = len(full_test_dataset)  # type: ignore
 
-    # Initialize federated dataset
-    self._initialize_federated_dataset(num_partitions_int)
+    # Validate configuration
+    required_samples = config.eval_test_samples + config.public_max_samples
+    if required_samples > total_test_samples:
+      raise ValueError(
+        f"Insufficient test data: need {required_samples} samples "
+        f"(eval: {config.eval_test_samples} + public: {config.public_max_samples}) "
+        f"but only {total_test_samples} available"
+      )
 
-    # Load partition data
-    assert self.fds is not None  # Help type checker understand fds is initialized
+    return total_test_samples
 
-    # Load train partition (follows specified partitioner) and test partition (always IID)
-    train_partition = self.fds.load_partition(partition_id_int, "train")
-    test_partition = self.fds.load_partition(partition_id_int, "test")
-
-    # Apply transforms
-    train_partition = train_partition.with_transform(self.transform_manager.apply_train_transforms)
-    test_partition = test_partition.with_transform(self.transform_manager.apply_eval_transforms)
-
-    train_loader = DataLoader(train_partition, batch_size=self.config.batch_size, shuffle=self.config.shuffle_train)  # type: ignore
-    test_loader = DataLoader(test_partition, batch_size=self.config.batch_size, shuffle=self.config.shuffle_test)  # type: ignore
-
-    return train_loader, test_loader
-
-  def load_public_data(self, batch_size: Optional[int] = None, max_samples: Optional[int] = None) -> DataLoader:
-    """Load public data that is common to all clients.
+  def load_train_data(self, config: DataLoaderConfig) -> DataLoader:
+    """Load training data for federated learning.
 
     Args:
-      batch_size: Batch size for DataLoader
-      max_samples: Maximum number of samples to load
+      config: DataLoaderConfig instance containing partition settings
+
+    Returns:
+      DataLoader for training data
+    """
+    # Preload dataset (first time only, to avoid API rate limiting)
+    self._preload_dataset_once(config.dataset_name)
+
+    # Create transform manager
+    transform_manager = DataTransformManager(config)
+
+    # Create Non-IID training data partitioner
+    train_partitioner = create_partitioner(config)
+
+    # Initialize FederatedDataset for training data only
+    fds = FederatedDataset(
+      dataset=config.dataset_name,
+      partitioners={"train": train_partitioner},
+    )
+
+    # Load train partition (Non-IID) - specific to each client
+    train_partition = fds.load_partition(config.partition_id, "train")
+    train_partition = train_partition.with_transform(transform_manager.apply_train_transforms)
+
+    train_loader = DataLoader(train_partition, batch_size=config.batch_size, shuffle=config.shuffle_train)  # type: ignore
+
+    return train_loader
+
+  def load_test_data(self, config: DataLoaderConfig) -> DataLoader:
+    """Load test data for evaluation.
+
+    Args:
+      config: DataLoaderConfig instance
+
+    Returns:
+      DataLoader for evaluation test data
+    """
+    # Validate configuration
+    self._validate_config(config)
+
+    # Create transform manager
+    transform_manager = DataTransformManager(config)
+
+    # Load evaluation test data (excluding public data, using cache)
+    eval_test_dataset = DataLoaderManager._get_cached_dataset(config.dataset_name, f"test[:{config.eval_test_samples}]")
+    eval_test_wrapped = PublicDataset(eval_test_dataset, transform=transform_manager.eval_transforms)
+
+    test_loader = DataLoader(eval_test_wrapped, batch_size=config.batch_size, shuffle=config.shuffle_test)
+
+    return test_loader
+
+  def load_public_data(self, config: DataLoaderConfig) -> DataLoader:
+    """Load public data for knowledge distillation.
+
+    Args:
+      config: DataLoaderConfig instance
 
     Returns:
       DataLoader for public data
     """
-    batch_size = batch_size or self.config.batch_size
-    max_samples = max_samples or self.config.public_max_samples
+    # Validate configuration
+    self._validate_config(config)
 
-    # Load the test split of dataset
-    public_dataset = load_dataset(self.config.dataset_name, split=f"test[:{max_samples}]")
+    # Create transform manager
+    transform_manager = DataTransformManager(config)
 
-    # Create a PyTorch Dataset wrapper with transforms
-    public_dataset_wrapped = PublicDataset(public_dataset, transform=self.transform_manager.eval_transforms)
+    # Load public data from the LAST part of test split (separated from evaluation data, using cache)
+    public_dataset = DataLoaderManager._get_cached_dataset(config.dataset_name, f"test[-{config.public_max_samples}:]")
+    public_dataset_wrapped = PublicDataset(public_dataset, transform=transform_manager.eval_transforms)
 
-    # Create DataLoader for public data
-    public_loader = DataLoader(public_dataset_wrapped, batch_size=batch_size, shuffle=False)
-
-    dataset_size = len(public_dataset_wrapped)
-    expected_batches = dataset_size // batch_size + (1 if dataset_size % batch_size > 0 else 0)
-    print(f"[DEBUG] Public data: {dataset_size} samples, batch_size={batch_size}, expected_batches={expected_batches}")
+    public_loader = DataLoader(public_dataset_wrapped, batch_size=config.batch_size, shuffle=False)
 
     return public_loader

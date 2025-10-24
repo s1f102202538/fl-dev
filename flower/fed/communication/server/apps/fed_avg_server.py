@@ -1,8 +1,5 @@
 from typing import Callable, Tuple
 
-from datasets import load_dataset
-from fed.data.data_loader_config import DataLoaderConfig
-from fed.data.data_transform_manager import DataTransformManager
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
 from fed.util.create_model import create_model
@@ -33,22 +30,23 @@ class FedAvgServer:
   @staticmethod
   def on_fit_config(server_round: int) -> object:
     """Construct `config` that clients receive when running `fit()`"""
-    lr = 0.01  # 初期学習率
+    lr = 0.01
 
     return {"lr": lr}
 
   @staticmethod
-  def create_server(
-    model_name: str, dataset_name: str, use_wandb: bool, run_config, server_device: device, num_rounds: int, data_loader_config: DataLoaderConfig
-  ) -> ServerAppComponents:
-    net = create_model(model_name)
-    parameters = ndarrays_to_parameters(get_weights(net))
+  def create_server(model_name: str, use_wandb: bool, run_config, server_device: device, num_rounds: int, testloader: DataLoader) -> ServerAppComponents:
+    # 統一されたモデルを使用するかどうかを設定から取得
+    unified_model = run_config.get("unified_model", False)
+    n_classes = run_config.get("n_classes", 10)
+    out_dim = run_config.get("out_dim", 256)
 
-    global_test_set = load_dataset(dataset_name, split="test")
-    testloader = DataLoader(
-      global_test_set.with_transform(DataTransformManager(data_loader_config).apply_eval_transforms),  # type: ignore
-      batch_size=32,
-    )
+    if unified_model:
+      net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=False)
+    else:
+      net = create_model(model_name, n_classes=n_classes)
+
+    parameters = ndarrays_to_parameters(get_weights(net))
 
     # Define strategy
     strategy = CustomFedAvg(

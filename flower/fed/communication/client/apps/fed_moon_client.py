@@ -44,11 +44,12 @@ class FedMoonClient(NumPyClient):
     self.public_test_data = public_test_data
 
     # モデル状態保存用の名前定義
-    self.local_model_name = "fed-moon-model"
+    self.local_model_name = "local-model"
+    self.global_model_name = "global-model"
 
     # Moon対比学習の初期化
     self.moon_learner = MoonContrastiveLearning(
-      mu=1.0,
+      mu=5.0,
       temperature=0.5,
       device=self.device,
     )
@@ -59,15 +60,16 @@ class FedMoonClient(NumPyClient):
       device=self.device,
     )
 
+    # 前回モデルの履歴
+    self.previous_models = []
+
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
     """拡張FedMoon対比学習と適応ロジット共有によるローカルモデル訓練"""
-    current_round = int(config.get("current_round", 0))
     temperature = float(config.get("temperature", 3.0))
 
     previous_round_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     # 現在のローカルモデル状態を復元
     if previous_round_model is not None:
-      self.net = previous_round_model
       print("[DEBUG] Previous round model loaded successfully")
     else:
       print("[DEBUG] No previous model found, using initial model")
@@ -83,11 +85,20 @@ class FedMoonClient(NumPyClient):
       )
     else:
       if "avg_logits" in config and config["avg_logits"] is not None:
+        # 蒸留には保存されたグローバルモデルを使用
+        global_model_for_distillation = load_model_from_state(self.client_state, self.net, self.global_model_name)
+        if global_model_for_distillation is not None:
+          distillation_base_model = global_model_for_distillation
+          print("[DEBUG] Using saved global model for knowledge distillation")
+        else:
+          distillation_base_model = copy.deepcopy(self.net)
+          print("[DEBUG] No saved global model found, using current model for distillation")
+
         logits = base64_to_batch_list(config["avg_logits"])
 
         # 蒸留により仮想グローバルモデルを直接作成
         distillation = Distillation(
-          studentModel=copy.deepcopy(self.net),  # MoonModelを直接使用
+          studentModel=distillation_base_model,  # グローバルモデルまたは現在のモデルを使用
           public_data=self.public_test_data,
           soft_targets=logits,
         )
@@ -95,7 +106,7 @@ class FedMoonClient(NumPyClient):
         # FedKD論文に基づく知識蒸留パラメータで仮想グローバルモデルを作成
         virtual_global_model = distillation.train_knowledge_distillation(
           epochs=3,
-          learning_rate=0.001,
+          learning_rate=0.01,
           T=temperature,
           alpha=0.7,  # FedKD論文: KL蒸留損失の重み
           beta=0.3,  # FedKD論文: CE損失の重み
@@ -103,61 +114,66 @@ class FedMoonClient(NumPyClient):
         )
         virtual_global_model.to(self.device)
 
-        self.moon_learner.update_models(previous_round_model, virtual_global_model)
-        print("Updated Moon learner with previous round model and virtual global model")
+        # グローバルモデル を moon 学習の起点にする
+        self.net = virtual_global_model
 
-      train_loss = self.moon_trainer.train_with_enhanced_moon(
+        # 蒸留後のモデルをグローバルモデルとして保存
+        save_model_to_state(virtual_global_model, self.client_state, self.global_model_name)
+        print("[DEBUG] Distilled model saved as global model")
+
+        # Moon対比学習の前回モデルを更新
+        self.previous_models.append(previous_round_model)
+        # モデル履歴の管理
+        if len(self.previous_models) > 3:  # 最大3つの前回モデルを保持
+          self.previous_models.pop(0)
+
+        self.moon_learner.update_models(self.previous_models, virtual_global_model)
+        print(f"Updated Moon learner with {len(self.previous_models)} previous models and virtual global model")
+
+      # グローバルモデル を moon 学習の起点にする
+      train_loss = self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
         lr=0.01,
         epochs=self.local_epochs,
-        current_round=current_round,
+        args_optimizer="sgd",  # 元論文準拠
+        weight_decay=1e-4,  # 元論文準拠
       )
-
-    # MoonModel専用のinferenceメソッドを使用
-    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    logit_batches = filter_and_calibrate_logits(raw_logits, temperature=temperature)
 
     # 学習完了後のローカルモデル状態を保存
     save_model_to_state(self.net, self.client_state, self.local_model_name)
 
-    print(f"FedMoon enhanced client completed (Round {current_round})")
-    print("Client sending logit statistics:", [b.mean().item() for b in logit_batches])
+    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
+    print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
+    # ロジットのフィルタリングと較正処理
+    filtered_logits = filter_and_calibrate_logits(raw_logits)
+    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches")
+
+    print(f"Client training loss: {train_loss:.4f}")
 
     return (
       [],  # ロジット共有のみでパラメータ集約は行わないため空リストを返す
       len(self.train_loader.dataset),  # type: ignore
       {
         "train_loss": train_loss,
-        "logits": batch_list_to_base64(logit_batches),
-        "current_mu": self.moon_learner.mu,
+        "logits": batch_list_to_base64(filtered_logits),
       },
     )
 
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
     """性能追跡による拡張モデル評価"""
-    # 注意: サーバーからロジットのみを受信するため、parametersは使用されません
-    # モデル評価は現在のローカルモデル状態を使用します
 
-    # モデルをロードする（MoonModel全体）
+    # モデルをロードする
     loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     if loaded_model is not None:
       self.net = loaded_model
     else:
       print("[Warning] No saved model state found, using initial model")
 
-      # MoonModel専用のテストメソッドを使用
     loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
-
-    # 分析用の追加メトリクス
-    current_round = int(config.get("current_round", 0))
 
     return (
       loss,
       len(self.val_loader.dataset),  # type: ignore
-      {
-        "accuracy": accuracy,
-        "current_mu": self.moon_learner.mu,
-        "round": current_round,
-      },
+      {"accuracy": accuracy},
     )
