@@ -25,7 +25,7 @@ serverapp = "fed.communication.server.server_app:app"
 clientapp = "fed.communication.client.client_app:app"
 
 [tool.flwr.app.config]
-model_name = "mini-cnn"
+model_name = "simple-cnn"
 dataset_name = "uoft-cs/cifar10"
 client_name = "fed-moon-client"
 server_name = "fed-kd-server"

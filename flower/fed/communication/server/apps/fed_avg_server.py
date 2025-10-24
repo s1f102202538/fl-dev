@@ -42,9 +42,9 @@ class FedAvgServer:
     out_dim = run_config.get("out_dim", 256)
 
     if unified_model:
-      net = create_model(model_name, is_moon=False, out_dim=out_dim, n_classes=n_classes, use_projection_head=False, unified_model=True)
+      net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=False)
     else:
-      net = create_model(model_name)
+      net = create_model(model_name, n_classes=n_classes)
 
     parameters = ndarrays_to_parameters(get_weights(net))
 

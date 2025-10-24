@@ -10,7 +10,7 @@ from .base_model import BaseModel
 class MiniCNN(BaseModel):
   """軽量なMiniCNNモデル - CIFAR-10対応"""
 
-  def __init__(self, dropout_rate: float = 0.2) -> None:
+  def __init__(self, n_classes: int = 10, dropout_rate: float = 0.2) -> None:
     super().__init__()
 
     # CIFAR-10用畳み込み層（3チャンネル入力、32x32画像）
@@ -22,7 +22,7 @@ class MiniCNN(BaseModel):
 
     # 全結合層
     self.fc1 = nn.Linear(128 * 4 * 4, 128)
-    self.fc2 = nn.Linear(128, 10)
+    self.fc2 = nn.Linear(128, n_classes)
 
   def forward(self, x: Tensor):
     # 畳み込み層
@@ -47,7 +47,7 @@ class MiniCNN(BaseModel):
 class MiniCNNMNIST(BaseModel):
   """軽量なMiniCNNモデル - MNIST/FashionMNIST対応"""
 
-  def __init__(self, dropout_rate: float = 0.2) -> None:
+  def __init__(self, n_classes: int = 10, dropout_rate: float = 0.2) -> None:
     super().__init__()
 
     # MNIST用畳み込み層（1チャンネル入力、28x28画像）
@@ -58,7 +58,7 @@ class MiniCNNMNIST(BaseModel):
 
     # 全結合層
     self.fc1 = nn.Linear(32 * 7 * 7, 128)
-    self.fc2 = nn.Linear(128, 10)
+    self.fc2 = nn.Linear(128, n_classes)
 
   def forward(self, x: Tensor) -> Tensor:
     # 畳み込み層

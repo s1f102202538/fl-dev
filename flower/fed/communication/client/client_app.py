@@ -30,19 +30,19 @@ def client_fn(context: Context) -> Client:
   train_loader, val_loader = load_data(data_loader_config)
 
   if client_name == "fed-avg-client":
-    # 統一されたモデルを使用する場合（projection headなし）
+    # 統一されたモデルを使用する場合（MOONベースのprojection headなし）
     if unified_model:
-      net = create_model(model_name, is_moon=False, out_dim=out_dim, n_classes=n_classes, use_projection_head=False, unified_model=True)
+      net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=False)
     else:
-      net = create_model(model_name)
+      net = create_model(model_name, n_classes=n_classes)
 
     return FedAvgClient(net, context.state, train_loader, val_loader, local_epochs).to_client()
   elif client_name == "fed-kd-client":
-    # 統一されたモデルを使用する場合（projection headなし）
+    # 統一されたモデルを使用する場合（MOONベースのprojection headなし）
     if unified_model:
-      net = create_model(model_name, is_moon=False, out_dim=out_dim, n_classes=n_classes, use_projection_head=False, unified_model=True)
+      net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=False)
     else:
-      net = create_model(model_name)
+      net = create_model(model_name, n_classes=n_classes)
     public_test_data = load_public_data(data_loader_config)
 
     return FedKdClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
