@@ -70,4 +70,4 @@ class DataLoaderConfig:
   public_max_samples: int = 5000
 
   # Evaluation dataset configuration
-  eval_test_samples: int = 1000  # Number of test samples for evaluation
+  eval_test_samples: int = 1000

@@ -30,12 +30,12 @@ dataset_name = "uoft-cs/cifar10"
 client_name = "fed-moon-client"
 server_name = "fed-kd-server"
 
-num-server-rounds = 50
-local-epochs = 10
+num-server-rounds = 10
+local-epochs = 3
 
 server-device = "cpu"
 use-wandb = true
-wandb_project_name = "fl-dev-round-100"
+wandb_project_name = "fl-dev-fix"
 
 [tool.flwr.federations]
 default = "local-simulation"
