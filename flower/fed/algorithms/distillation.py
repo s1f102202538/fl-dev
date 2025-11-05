@@ -61,7 +61,14 @@ class Distillation:
         clip_grad_norm_(self.studentModel.parameters(), max_norm=1.0)
 
         optimizer.step()
+
+        # 損失の統計を更新
         running_loss += loss.item()
         batch_count += 1
+
+      # エポックごとの損失ログ出力
+      avg_loss = running_loss / batch_count if batch_count > 0 else 0.0
+
+      print(f"[Distillation] Epoch {epoch + 1}/{epochs}: Total Loss: {avg_loss:.6f}, ")
 
     return self.studentModel

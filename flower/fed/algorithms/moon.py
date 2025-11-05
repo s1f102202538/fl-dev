@@ -44,7 +44,7 @@ class MoonContrastiveLearning:
       model_copy.eval()
       for param in model_copy.parameters():
         param.requires_grad = False
-      model_copy.to("cpu")  # CPUに移動（メモリ節約）
+      model_copy.to("cpu")
       self.previous_models.append(model_copy)
 
     # グローバルモデルを保存

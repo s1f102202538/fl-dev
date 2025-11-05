@@ -31,12 +31,12 @@ client_name = "fed-moon-client"
 server_name = "fed-kd-server"
 
 
-num-server-rounds = 10
-local-epochs = 3
+num-server-rounds = 50
+local-epochs = 10
 
 server-device = "cpu"
 use-wandb = true
-wandb_project_name = "fl-dev-lr-0.01"
+wandb_project_name = "fl-dev-round-100"
 
 [tool.flwr.federations]
 default = "local-simulation"
