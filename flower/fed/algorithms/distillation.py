@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
-from torch.optim.adam import Adam
+from torch.optim import SGD
 from torch.utils.data import DataLoader
 
 from ..models.base_model import BaseModel
@@ -19,7 +19,7 @@ class Distillation:
   def train_knowledge_distillation(self, epochs: int, learning_rate: float, T: float, alpha: float, beta: float, device: torch.device) -> BaseModel:
     # 損失関数と最適化アルゴリズム
     ce_loss = nn.CrossEntropyLoss()
-    optimizer = Adam(self.studentModel.parameters(), lr=learning_rate)
+    optimizer = SGD(self.studentModel.parameters(), lr=learning_rate, momentum=0.9, weight_decay=1e-4)
 
     self.studentModel.train()  # 生徒モデルを学習モードに設定
 

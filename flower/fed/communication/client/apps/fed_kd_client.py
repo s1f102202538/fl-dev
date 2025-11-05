@@ -97,8 +97,8 @@ class FedKdClient(NumPyClient):
 
     # Train model with knowledge distillation
     self.net = distillation.train_knowledge_distillation(
-      epochs=5,
-      learning_rate=0.001,  # Distillation learning rate
+      epochs=3,
+      learning_rate=0.01,
       T=temperature,  # Server-provided temperature
       alpha=0.7,  # KL distillation loss weight
       beta=0.3,  # CE loss weight

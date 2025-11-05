@@ -40,12 +40,11 @@ class FedMoonClient(NumPyClient):
     # Model state storage keys
     self.local_model_name = "local-model"
     self.global_model_name = "global-model"
-    self.previous_models_key = "previous-models"
 
     # Initialize Moon contrastive learning
     self.moon_learner = MoonContrastiveLearning(
-      mu=5.0,
-      temperature=0.5,
+      mu=1.0,
+      temperature=1.0,
       device=self.device,
     )
 
@@ -73,7 +72,7 @@ class FedMoonClient(NumPyClient):
     # Perform training (normal or MOON based on available history)
     train_loss = self._perform_training()
 
-    # Save current model state and generate logits
+    # Save current model state for next round
     save_model_to_state(self.net, self.client_state, self.local_model_name)
     filtered_logits = self._generate_and_filter_logits()
 
@@ -120,8 +119,8 @@ class FedMoonClient(NumPyClient):
 
     # Train virtual global model with FedKD parameters
     virtual_global_model = distillation.train_knowledge_distillation(
-      epochs=5,
-      learning_rate=0.001,
+      epochs=3,
+      learning_rate=0.01,
       T=temperature,
       alpha=0.7,  # FedKD paper: KL distillation loss weight
       beta=0.3,  # FedKD paper: CE loss weight
@@ -138,40 +137,20 @@ class FedMoonClient(NumPyClient):
 
   def _update_model_history(self, previous_round_model: BaseModel) -> None:
     """Update model history for MOON contrastive learning."""
-    # Load existing model history
-    previous_models = self._load_previous_models()
-    previous_models.append(previous_round_model)
-
-    # Keep only last 3 models
-    if len(previous_models) > 3:
-      previous_models = previous_models[-3:]
-
-    # Save updated history
-    self._save_previous_models(previous_models)
-
-    # Update MOON learner with history and virtual global model
+    # Update MOON learner with previous model and current global model
     virtual_global_model = load_model_from_state(self.client_state, self.net, self.global_model_name)
     if virtual_global_model is None:
       virtual_global_model = self.net
 
-    self.moon_learner.update_models(previous_models, virtual_global_model)
-    print(f"Updated Moon learner with {len(previous_models)} previous models and virtual global model")
+    # MOON対比学習の設定
+    self.moon_learner.update_models(previous_round_model, virtual_global_model)
+    print("Updated Moon learner with 1 previous model and virtual global model")
 
   def _perform_training(self) -> float:
     """Perform training using normal or MOON approach based on available model history."""
-    previous_models = self._load_previous_models()
-
-    if len(previous_models) == 0:
-      print("[INFO] No previous models available, performing normal training")
-      return CNNTask.train(
-        net=self.net,
-        train_loader=self.train_loader,
-        epochs=self.local_epochs,
-        lr=0.01,
-        device=self.device,
-      )
-    else:
-      print(f"[INFO] Performing MOON training with {len(previous_models)} previous models")
+    # MOON学習が可能かチェック
+    if self.moon_learner.previous_model is not None and self.moon_learner.global_model is not None:
+      print("[INFO] Performing MOON training with previous model")
       return self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
@@ -179,6 +158,15 @@ class FedMoonClient(NumPyClient):
         epochs=self.local_epochs,
         args_optimizer="sgd",  # Original paper settings
         weight_decay=1e-4,  # Original paper settings
+      )
+    else:
+      print("[INFO] No previous model available, performing normal training")
+      return CNNTask.train(
+        net=self.net,
+        train_loader=self.train_loader,
+        epochs=self.local_epochs,
+        lr=0.01,
+        device=self.device,
       )
 
   def _generate_and_filter_logits(self) -> list:
@@ -209,35 +197,3 @@ class FedMoonClient(NumPyClient):
       len(self.val_loader.dataset),  # type: ignore
       {"accuracy": accuracy},
     )
-
-  def _load_previous_models(self) -> list:
-    """Load previous models from client state."""
-    previous_models = []
-
-    # 最大3つの前回モデルを順次ロード
-    for i in range(3):
-      model_key = f"{self.previous_models_key}-{i}"
-      model = load_model_from_state(self.client_state, self.net, model_key)
-      if model is not None:
-        previous_models.append(model)
-
-    return previous_models
-
-  def _save_previous_models(self, previous_models: list) -> None:
-    """Save previous models to client state."""
-    try:
-      # 最大3つのモデルのみ保持
-      models_to_save = previous_models[-3:] if len(previous_models) > 3 else previous_models
-
-      # 既存のモデルをクリア
-      for i in range(3):
-        model_key = f"{self.previous_models_key}-{i}"
-        if model_key in self.client_state:
-          del self.client_state[model_key]
-
-      # 新しいモデルを保存
-      for i, model in enumerate(models_to_save):
-        model_key = f"{self.previous_models_key}-{i}"
-        save_model_to_state(model, self.client_state, model_key)
-    except Exception as e:
-      print(f"[WARNING] Failed to save previous models: {e}")

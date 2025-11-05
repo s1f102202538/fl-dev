@@ -74,8 +74,13 @@ class ModelFedCon_noheader(BaseModel):
   def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
     # backbone（完全なモデル）を使用
     y = self.backbone(x)
-    # MOONアルゴリズムに必要な形式で返す（特徴なし、予測結果のみ）
-    return y, y, y
+
+    # projection headがない場合の特徴量抽出
+    # 最終層の前の特徴量を取得するのが理想だが、ここでは単純化して最終出力を特徴量として使用
+    h = y
+    proj = y
+
+    return h, proj, y
 
   @override
   def predict(self, x: Tensor) -> Tensor:
