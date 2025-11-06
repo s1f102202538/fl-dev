@@ -14,10 +14,10 @@ class SimpleCNN(BaseModel):
     super(SimpleCNN, self).__init__()
 
     # CIFAR-10用畳み込み層
-    self.conv1 = nn.Conv2d(3, 6, 5)  # kernel_size=5, no padding
+    self.conv1 = nn.Conv2d(3, 6, 5)
     self.relu = nn.ReLU()
     self.pool = nn.MaxPool2d(2, 2)
-    self.conv2 = nn.Conv2d(6, 16, 5)  # kernel_size=5, no padding
+    self.conv2 = nn.Conv2d(6, 16, 5)
 
     # 全結合層
     self.fc1 = nn.Linear(input_dim, hidden_dims[0])  # 16*5*5 -> 120
@@ -77,9 +77,9 @@ class SimpleCNNMNIST(BaseModel):
 
 # 論文準拠の特徴量抽出用ヘッダークラス
 class SimpleCNN_header(nn.Module):
-  """MOON論文準拠のSimpleCNNヘッダー - CIFAR-10用（特徴量抽出のみ）"""
+  """MOON論文準拠のSimpleCNNヘッダー"""
 
-  def __init__(self, input_dim: int = 16 * 5 * 5, hidden_dims: list = [120, 84], output_dim: int = 10):
+  def __init__(self, input_dim: int = 16 * 5 * 5, hidden_dims: list = [120, 84]):
     super(SimpleCNN_header, self).__init__()
 
     # CIFAR-10用畳み込み層
