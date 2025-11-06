@@ -37,13 +37,15 @@ class FedMoonClient(NumPyClient):
     self.net.to(self.device)
     self.public_test_data = public_test_data
 
+    self.virtual_global_model = net
+
     # Model state storage keys
     self.local_model_name = "local-model"
     self.global_model_name = "global-model"
 
     # Initialize Moon contrastive learning with optimized parameters
     self.moon_learner = MoonContrastiveLearning(
-      mu=0.5,  # Optimized from analysis: best performance at mu=0.5
+      mu=1.0,
       temperature=0.5,  # Optimized from analysis: best performance at temp=0.5
       device=self.device,
     )
@@ -118,32 +120,29 @@ class FedMoonClient(NumPyClient):
     )
 
     # Train virtual global model with optimized FedKD parameters
-    virtual_global_model = distillation.train_knowledge_distillation(
+    self.virtual_global_model = distillation.train_knowledge_distillation(
       epochs=5,  # Increased from 3 for better distillation
-      learning_rate=0.001,  # Reduced from 0.01 for more stable training
+      learning_rate=0.01,  # Reduced from 0.01 for more stable training
       T=temperature,
       alpha=0.7,  # FedKD paper: KL distillation loss weight
       beta=0.3,  # FedKD paper: CE loss weight
       device=self.device,
     )
-    virtual_global_model.to(self.device)
 
     # Use virtual global model as starting point for MOON learning
-    self.net = virtual_global_model
+    self.net = self.virtual_global_model
 
     # Save distilled model as global model
-    save_model_to_state(virtual_global_model, self.client_state, self.global_model_name)
+    save_model_to_state(self.virtual_global_model, self.client_state, self.global_model_name)
     print("[DEBUG] Distilled model saved as global model")
 
   def _update_model_history(self, previous_round_model: BaseModel) -> None:
     """Update model history for MOON contrastive learning."""
-    # Update MOON learner with previous model and current global model
-    virtual_global_model = load_model_from_state(self.client_state, self.net, self.global_model_name)
-    if virtual_global_model is None:
-      virtual_global_model = self.net
+    if self.virtual_global_model is None:
+      self.virtual_global_model = self.net
 
     # MOON対比学習の設定
-    self.moon_learner.update_models(previous_round_model, virtual_global_model)
+    self.moon_learner.update_models(previous_round_model, self.virtual_global_model)
     print("Updated Moon learner with 1 previous model and virtual global model")
 
   def _perform_training(self) -> float:
