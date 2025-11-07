@@ -44,14 +44,11 @@ class FedKDWeightedAvg(Strategy):
     evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
     run_config: UserConfig,
     use_wandb: bool = False,
-    # Enhanced logit filtering parameters for Non-IID environments
+    # Simplified logit filtering parameters
     logit_temperature: float = 3.0,  # 温度スケーリングパラメータ
     kd_temperature: float = 5.0,  # 知識蒸留用温度
     entropy_threshold: float = 0.01,  # エントロピー閾値（最小品質保証用）
     confidence_threshold: float = 0.08,  # 信頼度閾値（現実的な学習初期値）
-    adaptive_filtering: bool = True,  # 適応的フィルタリング有効化
-    max_history_rounds: int = 3,
-    target_filter_rate: float = 0.3,  # 目標フィルタリング率（30%程度）
   ) -> None:
     self.fraction_fit = fraction_fit
     self.fraction_evaluate = fraction_evaluate
@@ -66,25 +63,11 @@ class FedKDWeightedAvg(Strategy):
     self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
     self.avg_logits: List[Tensor] = []
 
-    # Enhanced logit filtering parameters for Non-IID environments
+    # Simplified logit filtering parameters
     self.logit_temperature = logit_temperature
     self.entropy_threshold = entropy_threshold
     self.confidence_threshold = confidence_threshold
-    self.adaptive_filtering = adaptive_filtering
-    self.max_history_rounds = max_history_rounds
-    self.target_filter_rate = target_filter_rate
-
-    # ロジット履歴とメトリクス
-    self.logit_history: List[List[Tensor]] = []
     self.kd_temperature = kd_temperature
-    self.round_metrics = []
-
-    # 適応的フィルタリング用の統計情報
-    self.quality_history: List[Dict[str, float]] = []
-    self.dynamic_thresholds: Dict[str, float] = {
-      "entropy_threshold": max(0.5, entropy_threshold),  # より緩い初期値
-      "confidence_threshold": max(0.02, confidence_threshold),  # より緩い初期値
-    }
 
     self.save_path, self.run_dir = create_run_dir(run_config)
     self.use_wandb = use_wandb
@@ -92,9 +75,6 @@ class FedKDWeightedAvg(Strategy):
     # Initialise W&B if set
     if use_wandb:
       self._init_wandb_project()
-
-    # Keep track of best acc
-    self.best_acc_so_far = 0.0
 
     # A dictionary to store results as they come
     self.results: Dict = {}
@@ -195,99 +175,8 @@ class FedKDWeightedAvg(Strategy):
         "concentration": 1.0 / (entropy + eps),
       }
 
-  def _update_adaptive_thresholds(self, current_round: int, overall_quality: Dict[str, float], filtering_rate: float = 0.0) -> None:
-    """適応的にフィルタリング閾値を更新（Non-IID環境対応）
-
-    Args:
-        current_round: 現在のラウンド数
-        overall_quality: 全体的な品質メトリクス
-        filtering_rate: フィルタリング率（0.0-1.0）
-    """
-    if not self.adaptive_filtering:
-      return
-
-    # 品質履歴に追加
-    self.quality_history.append(overall_quality)
-
-    # 履歴の最大サイズを制限
-    if len(self.quality_history) > self.max_history_rounds * 2:
-      self.quality_history = self.quality_history[-self.max_history_rounds * 2 :]
-
-    if len(self.quality_history) >= 3:  # 最低3ラウンド必要
-      # 最近の品質トレンドを分析
-      recent_confidence = [q["confidence_score"] for q in self.quality_history[-3:]]
-      recent_non_iid = [q["non_iid_score"] for q in self.quality_history[-3:]]
-
-      avg_confidence = sum(recent_confidence) / len(recent_confidence)
-      avg_non_iid = sum(recent_non_iid) / len(recent_non_iid)
-
-      # フィルタリング率に基づく適応的調整
-      filter_rate_diff = filtering_rate - self.target_filter_rate
-
-      if filtering_rate > 0.9:  # 90%以上フィルタリング：緊急緩和
-        print(f"[FedKD] 🚨 EMERGENCY: {filtering_rate:.1%} filtered - applying dramatic threshold relaxation")
-        print(
-          f"[FedKD] 🔧 Entropy threshold: {self.dynamic_thresholds['entropy_threshold']:.4f} → {max(0.005, self.dynamic_thresholds['entropy_threshold'] * 0.3):.4f}"
-        )
-        print(
-          f"[FedKD] 🔧 Confidence threshold: {self.dynamic_thresholds['confidence_threshold']:.4f} → {max(0.02, self.dynamic_thresholds['confidence_threshold'] * 0.3):.4f}"
-        )
-        self.dynamic_thresholds["entropy_threshold"] = max(0.005, self.dynamic_thresholds["entropy_threshold"] * 0.3)
-        self.dynamic_thresholds["confidence_threshold"] = max(0.02, self.dynamic_thresholds["confidence_threshold"] * 0.3)
-      elif filtering_rate > 0.7:  # 70%以上フィルタリング：積極的緩和
-        print(f"[FedKD] ⚠️  HIGH FILTERING: {filtering_rate:.1%} - relaxing thresholds")
-        print(
-          f"[FedKD] 🔧 Entropy threshold: {self.dynamic_thresholds['entropy_threshold']:.4f} → {max(0.005, self.dynamic_thresholds['entropy_threshold'] * 0.7):.4f}"
-        )
-        print(
-          f"[FedKD] 🔧 Confidence threshold: {self.dynamic_thresholds['confidence_threshold']:.4f} → {max(0.02, self.dynamic_thresholds['confidence_threshold'] * 0.7):.4f}"
-        )
-        self.dynamic_thresholds["entropy_threshold"] = max(0.005, self.dynamic_thresholds["entropy_threshold"] * 0.7)
-        self.dynamic_thresholds["confidence_threshold"] = max(0.02, self.dynamic_thresholds["confidence_threshold"] * 0.7)
-      elif abs(filter_rate_diff) > 0.2:  # 目標から20%以上乖離
-        if filter_rate_diff > 0:  # フィルタリング過多
-          adjustment_factor = 0.8
-          print(f"[FedKD] 📉 OVER-FILTERING: {filtering_rate:.1%} vs target {self.target_filter_rate:.1%} - relaxing thresholds")
-        else:  # フィルタリング不足
-          adjustment_factor = 1.1
-          print(f"[FedKD] 📈 UNDER-FILTERING: {filtering_rate:.1%} vs target {self.target_filter_rate:.1%} - tightening thresholds")
-
-        old_entropy = self.dynamic_thresholds["entropy_threshold"]
-        old_confidence = self.dynamic_thresholds["confidence_threshold"]
-        self.dynamic_thresholds["entropy_threshold"] = max(0.005, min(0.1, self.dynamic_thresholds["entropy_threshold"] * adjustment_factor))
-        self.dynamic_thresholds["confidence_threshold"] = max(0.02, min(0.3, self.dynamic_thresholds["confidence_threshold"] * adjustment_factor))
-        print(f"[FedKD] 🔧 Entropy threshold: {old_entropy:.4f} → {self.dynamic_thresholds['entropy_threshold']:.4f}")
-        print(f"[FedKD] 🔧 Confidence threshold: {old_confidence:.4f} → {self.dynamic_thresholds['confidence_threshold']:.4f}")
-      # 学習初期段階の段階的閾値調整（最初の10ラウンド）
-      elif current_round <= 10:
-        # 学習初期は非常に緩い閾値から開始し、徐々に厳格化
-        base_entropy = 0.005 + (current_round - 1) * 0.005
-        base_confidence = 0.02 + (current_round - 1) * 0.01
-        self.dynamic_thresholds["entropy_threshold"] = min(base_entropy, 0.05)
-        self.dynamic_thresholds["confidence_threshold"] = min(base_confidence, 0.12)
-        if current_round % 3 == 0:
-          print(f"[FedKD] Early training phase: gradual threshold increase (round {current_round})")
-      # Non-IIDの程度に基づいて閾値を調整
-      elif avg_non_iid > 0.5:  # 高いNon-IID環境
-        # より厳しい閾値に調整（品質の低いロジットを除外）
-        self.dynamic_thresholds["entropy_threshold"] = max(0.02, self.entropy_threshold * 0.8)
-        self.dynamic_thresholds["confidence_threshold"] = min(0.4, self.confidence_threshold * 1.2)
-        if current_round % 5 == 0:  # 5ラウンドごとのみログ出力
-          print(f"[FedKD] High Non-IID detected (score: {avg_non_iid:.3f}), stricter thresholds applied")
-      elif avg_confidence < 0.2:  # 低い信頼度
-        # より緩い閾値に調整（より多くのロジットを保持）
-        self.dynamic_thresholds["entropy_threshold"] = min(0.15, self.entropy_threshold * 1.5)
-        self.dynamic_thresholds["confidence_threshold"] = max(0.03, self.confidence_threshold * 0.7)
-        if current_round % 5 == 0:  # 5ラウンドごとのみログ出力
-          print(f"[FedKD] Low confidence detected (score: {avg_confidence:.3f}), relaxed thresholds applied")
-
-      if current_round % 10 == 0:  # 10ラウンドごとに閾値をログ出力
-        print(
-          f"[FedKD] Updated thresholds - Entropy: {self.dynamic_thresholds['entropy_threshold']:.3f}, Confidence: {self.dynamic_thresholds['confidence_threshold']:.3f}"
-        )
-
   def _should_filter_logit(self, quality: Dict[str, float]) -> Tuple[bool, str]:
-    """ロジットをフィルタリングすべきかを判定
+    """ロジットをフィルタリングすべきかを判定（簡素化版）
 
     Args:
         quality: ロジットの品質メトリクス
@@ -298,11 +187,11 @@ class FedKDWeightedAvg(Strategy):
     reasons = []
 
     # エントロピー閾値チェック（低すぎる場合は除外）
-    if quality["entropy"] < self.dynamic_thresholds["entropy_threshold"]:
+    if quality["entropy"] < self.entropy_threshold:
       reasons.append(f"low_entropy({quality['entropy']:.3f})")
 
     # 信頼度閾値チェック（低すぎる場合は除外）
-    if quality["confidence_score"] < self.dynamic_thresholds["confidence_threshold"]:
+    if quality["confidence_score"] < self.confidence_threshold:
       reasons.append(f"low_confidence({quality['confidence_score']:.3f})")
 
     # 異常値検出（極端な値の場合は除外）
@@ -318,7 +207,7 @@ class FedKDWeightedAvg(Strategy):
     return should_filter, reason
 
   def _relative_quality_filter(self, batch_qualities: List[Dict[str, float]], target_keep_ratio: float = 0.7) -> List[bool]:
-    """相対的品質に基づくフィルタリング（目標保持率に基づく）
+    """相対的品質に基づくフィルタリング（簡素化版）
 
     Args:
         batch_qualities: バッチ内の全ロジット品質リスト
@@ -407,9 +296,9 @@ class FedKDWeightedAvg(Strategy):
       # 品質順でソート（降順：高品質が先頭）
       batch_logits_candidates.sort(key=lambda x: composite_quality_score(x[2]), reverse=True)
 
-      # Step 3: 目標フィルタリング率に基づいて選択
+      # Step 3: 固定保持率に基づいて選択
       num_candidates = len(batch_logits_candidates)
-      keep_ratio = 1.0 - self.target_filter_rate
+      keep_ratio = 0.7  # 固定保持率
       num_to_keep = max(1, int(num_candidates * keep_ratio))  # 最低1つは保持
 
       selected_candidates = batch_logits_candidates[:num_to_keep]
@@ -458,20 +347,15 @@ class FedKDWeightedAvg(Strategy):
         "prediction_consistency": sum(q["prediction_consistency"] for q in batch_quality_metrics) / len(batch_quality_metrics),
       }
 
-      # ラウンド数を推定
-      current_round = len(getattr(self, "round_metrics", [])) + 1
       actual_filter_rate = total_filtered / total_evaluated * 100 if total_evaluated > 0 else 0.0
-      target_filter_rate_percent = self.target_filter_rate * 100
-      rate_deviation = actual_filter_rate - target_filter_rate_percent
 
-      print(f"[FedKD-WA] === Round {current_round} Weighted Average Aggregation Report ===")
-      print(f"  🎯 Filtering Rate: {actual_filter_rate:.1f}% (Target: {target_filter_rate_percent:.1f}%)")
-      print(f"  📈 Deviation: {rate_deviation:+.1f}% from target")
+      print("[FedKD-WA] === Weighted Average Aggregation Report ===")
+      print(f"  🎯 Filtering Rate: {actual_filter_rate:.1f}%")
       print(f"  🔢 Filtered: {total_filtered}/{total_evaluated} client logits")
       print(f"  📦 Output Batches: {len(aggregated_batches)} (= input {min_batches})")
       print("  🔗 Data Correspondence: MAINTAINED (1:1 mapping)")
       print(f"  📋 Avg Quality - Confidence: {overall_quality['confidence_score']:.4f}, Entropy: {overall_quality['entropy']:.4f}")
-      print(f"  ⚖️  Aggregation Method: Weighted Average (client performance based)")
+      print("  ⚖️  Aggregation Method: Weighted Average (client performance based)")
       print("  ============================================")
 
       # データ対応関係の確認
@@ -481,45 +365,6 @@ class FedKDWeightedAvg(Strategy):
         print(f"  ⚠️  Data correspondence issue: {len(aggregated_batches)} ≠ {min_batches}")
 
     return aggregated_batches
-
-  def _manage_logit_history(self, new_logits: List[Tensor]) -> None:
-    """ロジット履歴の管理"""
-    if new_logits:
-      self.logit_history.append(new_logits.copy())
-
-      # 履歴サイズを制限
-      if len(self.logit_history) > self.max_history_rounds:
-        self.logit_history.pop(0)
-
-  def _get_enhanced_logits(self) -> List[Tensor]:
-    """履歴を考慮した強化ロジット"""
-    if not self.logit_history:
-      return self.avg_logits
-
-    if len(self.logit_history) == 1:
-      return self.avg_logits
-
-    # 過去のロジットとの移動平均を計算
-    current_logits = self.avg_logits
-    if len(self.logit_history) >= 2:
-      prev_logits = self.logit_history[-2]
-
-      if len(current_logits) == len(prev_logits):
-        # 重み付き移動平均
-        alpha = 0.7  # 現在のロジットの重み
-        enhanced_logits = []
-
-        for curr_batch, prev_batch in zip(current_logits, prev_logits):
-          if curr_batch.shape == prev_batch.shape:
-            enhanced_batch = alpha * curr_batch + (1 - alpha) * prev_batch
-            enhanced_logits.append(enhanced_batch)
-          else:
-            enhanced_logits.append(curr_batch)
-
-        print(f"[FedKD] Applied temporal smoothing with {len(enhanced_logits)} batches (alpha=0.7)")
-        return enhanced_logits
-
-    return current_logits
 
   @override
   def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
@@ -548,8 +393,8 @@ class FedKDWeightedAvg(Strategy):
     # 現在のラウンド情報を追加
     config["current_round"] = server_round
 
-    # 強化されたロジットを取得（履歴を考慮）
-    enhanced_logits = self._get_enhanced_logits()
+    # 集約されたロジット（簡素化版）
+    enhanced_logits = self.avg_logits
 
     # サーバーからクライアントへの通信コスト測定
     server_to_client_mb = 0.0
@@ -618,9 +463,6 @@ class FedKDWeightedAvg(Strategy):
       # 重み付きロジット集約を実行
       self.avg_logits = self._weighted_average_logit_aggregation(logits_batch_lists, client_weights)
 
-      # ロジット履歴を管理
-      self._manage_logit_history(self.avg_logits)
-
       print(f"[FedKD-WA] Successfully aggregated {len(self.avg_logits)} batches using weighted average")
     else:
       print("[FedKD] No valid logits received from clients")
@@ -665,10 +507,7 @@ class FedKDWeightedAvg(Strategy):
       "current_logit_temperature": self.logit_temperature,
     }
 
-    # 品質メトリクスも追加
-    if self.quality_history:
-      latest_quality = self.quality_history[-1]
-      communication_metrics.update({f"quality_{key}": value for key, value in latest_quality.items()})
+    # 品質メトリクスは削除済み（簡素化のため）
 
     if self.avg_logits:
       communication_metrics["num_aggregated_batches"] = len(self.avg_logits)

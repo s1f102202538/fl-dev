@@ -1,7 +1,7 @@
 from fed.util.model_util import weighted_average
 from flwr.server import ServerAppComponents, ServerConfig
 
-from ..strategy.fed_kd import FedKDWeightedAvg
+from ..strategy.fed_kd_weighted_avg import FedKDWeightedAvg
 
 
 class FedKDWeightedAvgServer:

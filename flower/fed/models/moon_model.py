@@ -12,7 +12,7 @@ from .simple_cnn import SimpleCNN, SimpleCNN_header, SimpleCNNMNIST, SimpleCNNMN
 class ModelFedCon(BaseModel):
   """統一されたベースのMOONモデル（projection headあり）"""
 
-  def __init__(self, base_model: str, out_dim: int = 256, n_classes: int = 10, net_configs=None):
+  def __init__(self, base_model: str, out_dim: int = 256, n_classes: int = 10):
     super(ModelFedCon, self).__init__()
 
     if base_model == "mini-cnn":
@@ -57,7 +57,7 @@ class ModelFedCon(BaseModel):
 class ModelFedCon_noheader(BaseModel):
   """統一されたベースのMOONモデル（projection headなし）"""
 
-  def __init__(self, base_model: str, n_classes: int = 10, net_configs=None):
+  def __init__(self, base_model: str, n_classes: int = 10):
     super(ModelFedCon_noheader, self).__init__()
 
     if base_model == "mini-cnn":
