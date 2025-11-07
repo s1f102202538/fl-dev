@@ -8,7 +8,7 @@ from flwr.server import ServerApp, ServerAppComponents
 from torch import device
 
 from .apps.fed_avg_server import FedAvgServer
-from .apps.fed_kd_server import FedKDServer
+from .apps.fed_kd_server import FedKDWeightedAvgServer
 
 
 def server_fn(context: Context) -> ServerAppComponents:
@@ -33,7 +33,7 @@ def server_fn(context: Context) -> ServerAppComponents:
     net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     return FedAvgServer.create_server(net, use_wandb, context.run_config, server_device, num_rounds, testloader)
   elif server_name == "fed-kd-server":
-    return FedKDServer.create_server(use_wandb, context.run_config, num_rounds)
+    return FedKDWeightedAvgServer.create_server(use_wandb, context.run_config, num_rounds)
   else:
     raise ValueError(f"Unknown server name: {server_name}.")
 

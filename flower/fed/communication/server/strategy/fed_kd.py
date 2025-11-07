@@ -18,8 +18,15 @@ from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor
 
 
-class FedKD(Strategy):
-  """Federated Knowledge Distillation (FedKD) strategy."""
+class FedKDWeightedAvg(Strategy):
+  """Federated Knowledge Distillation with Weighted Average Logit Aggregation (FedKD-WA) strategy.
+
+  This strategy performs knowledge distillation using weighted average aggregation of client logits.
+  Key features:
+  - Weighted average aggregation of client logits based on client performance
+  - Quality-based filtering with batch-wise relative evaluation
+  - Temperature-scaled knowledge distillation
+  """
 
   def __init__(
     self,
@@ -335,18 +342,23 @@ class FedKD(Strategy):
 
     return [i in keep_indices for i in range(len(batch_qualities))]
 
-  def _weighted_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
-    """データ対応関係を保持する相対品質評価によるロジット集約
+  def _weighted_average_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
+    """データ対応関係を保持する加重平均ロジット集約
 
     重要: 公開データセットとの対応関係を維持するため、バッチごとに
-    相対的品質評価を行い、各バッチに対して必ず1つの集約ロジットを生成
+    品質ベース選択 + 加重平均を行い、各バッチに対して必ず1つの集約ロジットを生成
+
+    集約方式:
+    1. バッチごとの品質評価によるクライアント選択
+    2. 選択されたクライアントロジットの加重平均計算
+    3. クライアント重みを考慮した最終集約
 
     Args:
         logits_batch_lists: クライアントからのロジットバッチリスト
-        client_weights: クライアントの重み
+        client_weights: クライアントの重み（加重平均用）
 
     Returns:
-        公開データと1:1対応する集約済みロジットリスト
+        公開データと1:1対応する加重平均集約済みロジットリスト
     """
     if not logits_batch_lists:
       return []
@@ -356,7 +368,7 @@ class FedKD(Strategy):
     max_batches = max(len(batches) for batches in logits_batch_lists)
 
     if min_batches != max_batches:
-      print(f"[FedKD] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
+      print(f"[FedKD-WA] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
 
     # 重みを正規化
     total_weight = sum(client_weights)
@@ -381,7 +393,7 @@ class FedKD(Strategy):
 
       if not batch_logits_candidates:
         # このバッチにはロジットがない場合のフォールバック
-        print(f"[FedKD] Warning: No logits for batch {batch_idx}")
+        print(f"[FedKD-WA] Warning: No logits for batch {batch_idx}")
         continue
 
       # Step 2: このバッチ内での相対品質評価
@@ -411,16 +423,16 @@ class FedKD(Strategy):
         aggregated_batches.append(logits)
         batch_quality_metrics.append(quality)
       else:
-        # 複数ロジット: 重み付き平均
+        # 複数ロジット: クライアント重みベースの加重平均集約
         batch_logits = [candidate[1] for candidate in selected_candidates]
         batch_weights = [candidate[3] for candidate in selected_candidates]
 
-        # 重み正規化
+        # 加重平均用の重み正規化
         total_batch_weight = sum(batch_weights)
         if total_batch_weight > 0:
           batch_weights = [w / total_batch_weight for w in batch_weights]
 
-        # 重み付き集約
+        # 加重平均による集約（Weighted Average Aggregation）
         stacked_logits = torch.stack(batch_logits)
         weight_tensor = torch.tensor(batch_weights, device=stacked_logits.device).view(-1, 1, 1)
         weighted_logits = (stacked_logits * weight_tensor).sum(dim=0)
@@ -435,7 +447,7 @@ class FedKD(Strategy):
         selected_clients = [candidate[0] for candidate in selected_candidates]
         filtered_clients = [candidate[0] for candidate in batch_logits_candidates[num_to_keep:]]
         if filtered_count > 0:
-          print(f"[FedKD] Batch {batch_idx}: kept clients {selected_clients}, filtered clients {filtered_clients}")
+          print(f"[FedKD-WA] Batch {batch_idx}: kept clients {selected_clients}, filtered clients {filtered_clients}")
 
     # Step 5: 全体統計とログ出力
     if batch_quality_metrics and total_evaluated > 0:
@@ -452,14 +464,15 @@ class FedKD(Strategy):
       target_filter_rate_percent = self.target_filter_rate * 100
       rate_deviation = actual_filter_rate - target_filter_rate_percent
 
-      print(f"[FedKD] === Round {current_round} Batch-wise Filtering Report ===")
+      print(f"[FedKD-WA] === Round {current_round} Weighted Average Aggregation Report ===")
       print(f"  🎯 Filtering Rate: {actual_filter_rate:.1f}% (Target: {target_filter_rate_percent:.1f}%)")
       print(f"  📈 Deviation: {rate_deviation:+.1f}% from target")
       print(f"  🔢 Filtered: {total_filtered}/{total_evaluated} client logits")
       print(f"  📦 Output Batches: {len(aggregated_batches)} (= input {min_batches})")
-      print(f"  🔗 Data Correspondence: MAINTAINED (1:1 mapping)")
+      print("  🔗 Data Correspondence: MAINTAINED (1:1 mapping)")
       print(f"  📋 Avg Quality - Confidence: {overall_quality['confidence_score']:.4f}, Entropy: {overall_quality['entropy']:.4f}")
-      print(f"  ============================================")
+      print(f"  ⚖️  Aggregation Method: Weighted Average (client performance based)")
+      print("  ============================================")
 
       # データ対応関係の確認
       if len(aggregated_batches) == min_batches:
@@ -603,12 +616,12 @@ class FedKD(Strategy):
       print(f"[FedKD] Aggregating logits from {len(logits_batch_lists)} clients")
 
       # 重み付きロジット集約を実行
-      self.avg_logits = self._weighted_logit_aggregation(logits_batch_lists, client_weights)
+      self.avg_logits = self._weighted_average_logit_aggregation(logits_batch_lists, client_weights)
 
       # ロジット履歴を管理
       self._manage_logit_history(self.avg_logits)
 
-      print(f"[FedKD] Successfully aggregated {len(self.avg_logits)} batches of logits")
+      print(f"[FedKD-WA] Successfully aggregated {len(self.avg_logits)} batches using weighted average")
     else:
       print("[FedKD] No valid logits received from clients")
 
