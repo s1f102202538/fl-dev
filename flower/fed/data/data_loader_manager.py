@@ -143,7 +143,7 @@ class DataLoaderManager:
     eval_test_dataset = DataLoaderManager._get_cached_dataset(config.dataset_name, f"test[:{config.eval_test_samples}]")
     eval_test_wrapped = PublicDataset(eval_test_dataset, transform=transform_manager.eval_transforms)
 
-    test_loader = DataLoader(eval_test_wrapped, batch_size=config.batch_size, shuffle=config.shuffle_test)
+    test_loader = DataLoader(eval_test_wrapped, batch_size=config.batch_size, shuffle=config.shuffle_test, drop_last=True)
 
     return test_loader
 
@@ -166,6 +166,6 @@ class DataLoaderManager:
     public_dataset = DataLoaderManager._get_cached_dataset(config.dataset_name, f"test[-{config.public_max_samples}:]")
     public_dataset_wrapped = PublicDataset(public_dataset, transform=transform_manager.eval_transforms)
 
-    public_loader = DataLoader(public_dataset_wrapped, batch_size=config.batch_size, shuffle=False)
+    public_loader = DataLoader(public_dataset_wrapped, batch_size=config.batch_size, shuffle=False, drop_last=True)
 
     return public_loader

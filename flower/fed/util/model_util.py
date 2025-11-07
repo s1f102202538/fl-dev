@@ -63,29 +63,93 @@ def base64_to_batch_list(b64str: str) -> List[Tensor]:
   return load(buffer)
 
 
-def filter_and_calibrate_logits(logit_batches: List[Tensor]) -> List[Tensor]:
-  """ロジットの品質フィルタリングと較正処理
+def filter_and_calibrate_logits(
+  logit_batches: List[Tensor], temperature: float = 1.5, enable_quality_filter: bool = True, confidence_threshold: float = 0.2
+) -> List[Tensor]:
+  """Non-IID環境対応の強化されたロジットフィルタリングと較正処理
 
   Args:
       logit_batches: フィルタリング対象のロジットバッチリスト
-      temperature: 温度スケーリングのパラメータ
+      temperature: 温度スケーリングのパラメータ（サーバーから受信）
+      enable_quality_filter: 品質フィルタリングの有効/無効
+      confidence_threshold: 信頼度の最低閾値
 
   Returns:
       フィルタリング・較正されたロジットバッチリスト
   """
   filtered_logits = []
-  for batch in logit_batches:
+  filtered_count = 0
+
+  for batch_idx, batch in enumerate(logit_batches):
     # NaN/Inf値の検出と修正
     if torch.isnan(batch).any() or torch.isinf(batch).any():
-      print("警告: ロジット内のNaN/Infを検出、ゼロで置換")
+      print(f"警告: バッチ{batch_idx}でNaN/Infを検出、ゼロで置換")
       batch = torch.zeros_like(batch)
 
-    # 極値のクリッピング
-    calibrated_batch = torch.clamp(batch, min=-10, max=10)
+    # 数値安定性のための基本クリッピング
+    calibrated_batch = torch.clamp(batch, min=-20, max=20)
+
+    # 品質フィルタリング（有効な場合のみ）
+    if enable_quality_filter:
+      quality_passed, reason = _assess_batch_quality(calibrated_batch, confidence_threshold)
+      if not quality_passed:
+        print(f"[Client] バッチ{batch_idx}を品質フィルタで除外: {reason}")
+        filtered_count += 1
+        continue
+
+    # 温度スケーリング（サーバーから受信した温度を使用）
+    if temperature != 1.0:
+      calibrated_batch = calibrated_batch / temperature
+
+    # 最終的な極値クリッピング
+    calibrated_batch = torch.clamp(calibrated_batch, min=-10, max=10)
 
     filtered_logits.append(calibrated_batch)
 
+  if filtered_count > 0:
+    retention_rate = len(filtered_logits) / len(logit_batches) * 100
+    print(f"[Client] 品質フィルタリング完了: {filtered_count}/{len(logit_batches)} バッチを除外 (保持率: {retention_rate:.1f}%)")
+
   return filtered_logits
+
+
+def _assess_batch_quality(logits: Tensor, confidence_threshold: float) -> Tuple[bool, str]:
+  """ロジットバッチの品質を評価
+
+  Args:
+      logits: 評価対象のロジットテンソル
+      confidence_threshold: 信頼度の最低閾値
+
+  Returns:
+      (quality_passed, reason) のタプル
+  """
+  with torch.no_grad():
+    # ソフトマックス確率を計算
+    probs = torch.softmax(logits, dim=1)
+
+    # 1. 異常値チェック
+    if torch.any(torch.abs(logits) > 50):
+      return False, "extreme_values"
+
+    # 2. 分散チェック（過度に均一でないか）
+    variance = logits.var(dim=1).mean().item()
+    if variance < 0.01:  # 分散が小さすぎる
+      return False, f"low_variance({variance:.4f})"
+
+    # 3. 信頼度チェック
+    max_probs = probs.max(dim=1)[0]
+    avg_confidence = max_probs.mean().item()
+    if avg_confidence < confidence_threshold:
+      return False, f"low_confidence({avg_confidence:.3f})"
+
+    # 4. エントロピーチェック（情報量）
+    eps = 1e-8
+    probs_safe = torch.clamp(probs, min=eps, max=1.0 - eps)
+    entropy = -torch.sum(probs_safe * torch.log(probs_safe), dim=1).mean().item()
+    if entropy < 0.1:  # エントロピーが低すぎる（過信状態）
+      return False, f"low_entropy({entropy:.3f})"
+
+    return True, "high_quality"
 
 
 # モデル状態管理用関数

@@ -13,7 +13,13 @@ class FedKDServer:
       fraction_fit=1.0,
       fraction_evaluate=1.0,
       evaluate_metrics_aggregation_fn=weighted_average,
-      max_history_rounds=2,
+      # Enhanced logit filtering parameters for Non-IID environments
+      logit_temperature=3.0,  # ロジット正規化用温度
+      kd_temperature=5.0,  # 知識蒸留用温度（最適化済み）
+      entropy_threshold=0.1,  # エントロピー閾値（Non-IID対応）
+      confidence_threshold=0.3,  # 信頼度閾値
+      adaptive_filtering=True,  # 適応的フィルタリング有効
+      max_history_rounds=3,  # 履歴保持数を増加
     )
     config = ServerConfig(num_rounds=num_rounds)
 

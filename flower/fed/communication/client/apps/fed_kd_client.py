@@ -61,7 +61,10 @@ class FedKdClient(NumPyClient):
 
     # Save trained model and generate logits for sharing
     save_model_to_state(self.net, self.client_state, self.local_model_name)
-    filtered_logits = self._generate_and_filter_logits()
+
+    # Use temperature from server config for logit filtering
+    logit_temp = float(config.get("logit_temperature", 1.5))
+    filtered_logits = self._generate_and_filter_logits(temperature=logit_temp)
 
     print(f"Client training loss: {train_loss:.4f}")
 
@@ -122,16 +125,16 @@ class FedKdClient(NumPyClient):
     print(f"[DEBUG] Local training completed with loss: {train_loss:.4f}")
     return train_loss
 
-  def _generate_and_filter_logits(self) -> list:
-    """Generate and filter logits for sharing with server."""
+  def _generate_and_filter_logits(self, temperature: float = 1.5) -> list:
+    """Generate and filter logits for sharing with server using enhanced filtering."""
 
     # Generate raw logits using trained model
     raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
     print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
 
-    # Filter and calibrate logits
-    filtered_logits = filter_and_calibrate_logits(raw_logits)
-    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches")
+    # Apply enhanced filtering with temperature from server
+    filtered_logits = filter_and_calibrate_logits(raw_logits, temperature=temperature, enable_quality_filter=True, confidence_threshold=0.25)
+    print(f"[DEBUG] Enhanced filtered logits: {len(filtered_logits)} batches")
 
     return filtered_logits
 
