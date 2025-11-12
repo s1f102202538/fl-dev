@@ -63,43 +63,28 @@ def base64_to_batch_list(b64str: str) -> List[Tensor]:
   return load(buffer)
 
 
-def filter_and_calibrate_logits(
-  logit_batches: List[Tensor], temperature: float = 1.5, enable_quality_filter: bool = False, confidence_threshold: float = 0.2
-) -> List[Tensor]:
-  """ロジットの基本的な較正処理（フィルタリング除外設定を削除）
+def filter_and_calibrate_logits(logit_batches: List[Tensor]) -> List[Tensor]:
+  """ロジットの基本的な較正処理（元の簡素版に復元）
 
   Args:
       logit_batches: 較正対象のロジットバッチリスト
-      temperature: 温度スケーリングのパラメータ（サーバーから受信）
-      enable_quality_filter: 品質フィルタリングの有効/無効（デフォルト無効）
-      confidence_threshold: 信頼度の閾値（未使用）
 
   Returns:
       較正されたロジットバッチリスト
   """
-  calibrated_logits = []
-
-  for batch_idx, batch in enumerate(logit_batches):
-    # NaN/Inf値の検出と修正（基本的な数値安定性のみ）
+  filtered_logits = []
+  for batch in logit_batches:
+    # NaN/Inf値の検出と修正
     if torch.isnan(batch).any() or torch.isinf(batch).any():
-      print(f"[Client] 警告: バッチ{batch_idx}でNaN/Infを検出、ゼロで置換")
+      print("警告: ロジット内のNaN/Infを検出、ゼロで置換")
       batch = torch.zeros_like(batch)
 
-    # 数値安定性のための基本クリッピング
-    calibrated_batch = torch.clamp(batch, min=-20, max=20)
+    # 極値のクリッピング（元の設定）
+    calibrated_batch = torch.clamp(batch, min=-10, max=10)
 
-    # 温度スケーリング（サーバーから受信した温度を使用）
-    if temperature != 1.0:
-      calibrated_batch = calibrated_batch / temperature
+    filtered_logits.append(calibrated_batch)
 
-    # 最終的な極値クリッピング
-    calibrated_batch = torch.clamp(calibrated_batch, min=-10, max=10)
-
-    calibrated_logits.append(calibrated_batch)
-
-  print(f"[Client] ロジット較正完了: {len(calibrated_logits)} バッチを処理 (フィルタリング除外なし)")
-
-  return calibrated_logits
+  return filtered_logits
 
 
 # モデル状態管理用関数

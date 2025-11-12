@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.utils import clip_grad_norm_
-from torch.optim import SGD
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
 from ..models.base_model import BaseModel
@@ -84,9 +84,21 @@ class Distillation:
     return True
 
   def train_knowledge_distillation(self, epochs: int, learning_rate: float, T: float, alpha: float, beta: float, device: torch.device) -> BaseModel:
-    # 損失関数と最適化アルゴリズム
+    # 損失関数と最適化アルゴリズム（元の設定に復元）
     ce_loss = nn.CrossEntropyLoss()
-    optimizer = SGD(self.studentModel.parameters(), lr=learning_rate, momentum=0.9, weight_decay=1e-4)
+    # 元の高性能設定に戻す: Adam + 低学習率
+    from torch.optim import Adam
+
+    optimizer = Adam(self.studentModel.parameters(), lr=learning_rate)
+
+    scheduler = ReduceLROnPlateau(
+      optimizer,
+      mode="min",
+      factor=0.5,
+      patience=3,
+      threshold=1e-4,
+      min_lr=learning_rate * 0.01,
+    )
 
     self.studentModel.train()  # 生徒モデルを学習モードに設定
 
@@ -129,9 +141,17 @@ class Distillation:
           if not self._validate_logits_compatibility(student_logits, soft_batch, batch_idx):
             continue
 
+          # ロジットのクリッピング
+          soft_batch_clipped = torch.clamp(soft_batch, min=-20, max=20)
+          student_logits_clipped = torch.clamp(student_logits, min=-20, max=20)
+
           # 温度スケーリングされたソフトマックス
-          teacher_probs = F.softmax(soft_batch / T, dim=1)  # 教師の確率分布
-          student_log_probs = F.log_softmax(student_logits / T, dim=1)  # 生徒のlog確率分布
+          teacher_probs = F.softmax(soft_batch_clipped / T, dim=1)  # 教師の確率分布
+          student_log_probs = F.log_softmax(student_logits_clipped / T, dim=1)  # 生徒のlog確率分布
+
+          # 数値安定性のためのクリッピング
+          eps = 1e-8
+          teacher_probs = torch.clamp(teacher_probs, min=eps, max=1.0 - eps)
 
           # KL損失: KL(teacher || student) - 教師から生徒への知識転移
           distillation_loss = F.kl_div(student_log_probs, teacher_probs, reduction="batchmean") * (T**2)
@@ -141,7 +161,7 @@ class Distillation:
           continue
 
         # 生徒モデルの通常のCE損失
-        student_loss = ce_loss(student_logits, labels)
+        student_loss = ce_loss(student_logits_clipped, labels)
 
         loss = alpha * distillation_loss + beta * student_loss
 
@@ -157,9 +177,8 @@ class Distillation:
         running_loss += loss.item()
         batch_count += 1
 
-      # エポックごとの損失ログ出力
-      avg_loss = running_loss / batch_count if batch_count > 0 else 0.0
-
-      print(f"[Distillation] Epoch {epoch + 1}/{epochs}: Total Loss: {avg_loss:.6f}, ")
+      epoch_loss = running_loss / batch_count
+      scheduler.step(epoch_loss)
+      print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
 
     return self.studentModel

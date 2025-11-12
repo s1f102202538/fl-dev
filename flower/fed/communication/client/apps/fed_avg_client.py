@@ -63,6 +63,5 @@ class FedAvgClient(NumPyClient):
     last time it trained the model.
     """
     set_weights(self.net, parameters)
-
     loss, accuracy = CNNTask.test(self.net, self.val_loader, self.device)
     return loss, len(self.val_loader.dataset), {"accuracy": accuracy}  # type: ignore

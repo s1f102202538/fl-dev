@@ -5,7 +5,6 @@ from logging import WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
 import torch
-import torch.nn.functional as F
 import wandb
 from fed.algorithms.distillation import Distillation
 from fed.models.base_model import BaseModel
@@ -135,83 +134,12 @@ class FedKDDistillationModel(Strategy):
       # Log metrics to W&B
       wandb.log(results_dict, step=server_round)
 
-  def _calculate_logit_uncertainty(self, logit_batch: Tensor) -> float:
-    """Calculate uncertainty (entropy) of a logit batch.
-
-    Args:
-        logit_batch: Tensor of logits [batch_size, num_classes]
-
-    Returns:
-        Average entropy (uncertainty) of the batch
-    """
-    # Convert logits to probabilities using softmax
-    probs = F.softmax(logit_batch, dim=-1)
-
-    # Calculate entropy: -sum(p * log(p))
-    # Add small epsilon to avoid log(0)
-    eps = 1e-8
-    entropy = -torch.sum(probs * torch.log(probs + eps), dim=-1)
-
-    # Return average entropy across the batch
-    return float(torch.mean(entropy).item())
-
-  def _calculate_uncertainty_weights(self, logits_batch_lists: List[List[Tensor]]) -> List[float]:
-    """Calculate uncertainty-based weights for client logits.
-
-    Args:
-        logits_batch_lists: List of logit batch lists from each client
-
-    Returns:
-        List of uncertainty-based weights (lower uncertainty = higher weight)
-    """
-    client_uncertainties = []
-
-    for client_idx, client_logits in enumerate(logits_batch_lists):
-      if not client_logits:
-        client_uncertainties.append(float("inf"))  # Maximum uncertainty for empty logits
-        continue
-
-      # Calculate average uncertainty across all batches for this client
-      batch_uncertainties = []
-      for batch in client_logits:
-        uncertainty = self._calculate_logit_uncertainty(batch)
-        batch_uncertainties.append(uncertainty)
-
-      avg_uncertainty = sum(batch_uncertainties) / len(batch_uncertainties)
-      client_uncertainties.append(avg_uncertainty)
-
-      print(f"[FedKD-Server] Client {client_idx}: Average uncertainty = {avg_uncertainty:.4f}")
-
-    # Convert uncertainties to weights (inverse relationship)
-    # Lower uncertainty = higher confidence = higher weight
-    max_uncertainty = max(u for u in client_uncertainties if u != float("inf"))
-    uncertainty_weights = []
-
-    for uncertainty in client_uncertainties:
-      if uncertainty == float("inf"):
-        uncertainty_weights.append(0.0)  # No weight for empty logits
-      else:
-        # Weight = (max_uncertainty - uncertainty + epsilon) to ensure positive weights
-        # Normalized so that minimum uncertainty gets maximum weight
-        weight = max_uncertainty - uncertainty + 0.1
-        uncertainty_weights.append(weight)
-
-    # Normalize weights to sum to 1
-    total_weight = sum(uncertainty_weights)
-    if total_weight > 0:
-      uncertainty_weights = [w / total_weight for w in uncertainty_weights]
-    else:
-      # Fallback to equal weights if all uncertainties are the same
-      uncertainty_weights = [1.0 / len(logits_batch_lists)] * len(logits_batch_lists)
-
-    return uncertainty_weights
-
   def _aggregate_client_logits(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
-    """Aggregate client logits using uncertainty-based weighted averaging.
+    """Aggregate client logits using simple averaging.
 
     Args:
         logits_batch_lists: List of logit batch lists from each client
-        client_weights: Original weights for each client (not used, kept for compatibility)
+        client_weights: Weights for each client (ignored, kept for compatibility)
 
     Returns:
         List of aggregated logit batches
@@ -219,11 +147,7 @@ class FedKDDistillationModel(Strategy):
     if not logits_batch_lists:
       return []
 
-    # Calculate uncertainty-based weights instead of using data size weights
-    print("[FedKD-Server] Calculating uncertainty-based weights for logit aggregation")
-    uncertainty_weights = self._calculate_uncertainty_weights(logits_batch_lists)
-
-    print(f"[FedKD-Server] Uncertainty-based weights: {[f'{w:.4f}' for w in uncertainty_weights]}")
+    print("[FedKD-Server] Using simple averaging for logit aggregation")
 
     # Get the number of batches (assuming all clients have the same number of batches)
     num_batches = len(logits_batch_lists[0])
@@ -235,29 +159,22 @@ class FedKDDistillationModel(Strategy):
 
     aggregated_logits = []
 
-    # Aggregate each batch position across all clients using uncertainty-based weights
+    # Aggregate each batch position across all clients using simple averaging
     for batch_idx in range(num_batches):
       # Collect logits from all clients for this batch position
       batch_logits_list = []
-      batch_weights_list = []
 
       for client_idx, client_logits in enumerate(logits_batch_lists):
         if batch_idx < len(client_logits):  # Safety check
           batch_logits_list.append(client_logits[batch_idx])
-          batch_weights_list.append(uncertainty_weights[client_idx])
 
       if batch_logits_list:
-        # Uncertainty-based weighted average of logits for this batch
-        weighted_sum = torch.zeros_like(batch_logits_list[0])
-        total_weight = sum(batch_weights_list)
-
-        for logits, weight in zip(batch_logits_list, batch_weights_list):
-          weighted_sum += logits * weight
-
-        aggregated_batch = weighted_sum / total_weight if total_weight > 0 else weighted_sum
+        # Simple arithmetic mean of logits for this batch
+        stacked_logits = torch.stack(batch_logits_list)
+        aggregated_batch = torch.mean(stacked_logits, dim=0)
         aggregated_logits.append(aggregated_batch)
 
-    print(f"[FedKD-Server] Aggregated {len(aggregated_logits)} batches using uncertainty-based weights")
+    print(f"[FedKD-Server] Aggregated {len(aggregated_logits)} batches using simple averaging")
     return aggregated_logits
 
   def _train_server_model_with_aggregated_logits(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float], server_round: int) -> None:

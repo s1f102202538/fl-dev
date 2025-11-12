@@ -4,7 +4,6 @@ from logging import WARNING
 from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
 import torch
-import torch.nn.functional as F
 import wandb
 from fed.util.communication_cost import calculate_data_size_mb
 from fed.util.model_util import base64_to_batch_list, batch_list_to_base64, create_run_dir
@@ -18,7 +17,7 @@ from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor
 
 
-class FedKDWeightedAvg(Strategy):
+class FedKDAvg(Strategy):
   """Federated Knowledge Distillation with Weighted Average Logit Aggregation (FedKD-WA) strategy.
 
   This strategy performs knowledge distillation using weighted average aggregation of client logits.
@@ -115,120 +114,15 @@ class FedKDWeightedAvg(Strategy):
       # Log metrics to W&B
       wandb.log(results_dict, step=server_round)
 
-  def _evaluate_logit_quality(self, logits: Tensor) -> Dict[str, float]:
-    """ロジットの品質を評価する（Non-IID環境対応版）
-
-    Args:
-        logits: 評価対象のロジットテンソル
-
-    Returns:
-        品質メトリクスの辞書
-    """
-    with torch.no_grad():
-      # 数値安定性のためのクリッピング
-      logits_clipped = torch.clamp(logits, min=-20, max=20)
-
-      # 温度スケーリングありとなしの確率を計算
-      probs_raw = F.softmax(logits_clipped, dim=1)
-      probs_temp = F.softmax(logits_clipped / self.logit_temperature, dim=1)
-
-      # 数値安定性のためeps追加
-      eps = 1e-8
-      probs_raw = torch.clamp(probs_raw, min=eps, max=1.0 - eps)
-      probs_temp = torch.clamp(probs_temp, min=eps, max=1.0 - eps)
-
-      # 基本品質指標
-      entropy = -torch.sum(probs_raw * torch.log(probs_raw), dim=1).mean().item()
-      max_prob = probs_raw.max(dim=1)[0].mean().item()
-      logit_variance = logits_clipped.var(dim=1).mean().item()
-
-      # Non-IID環境向けの追加指標
-      # 1. クラス分布の均一性（Jensen-Shannon divergence）
-      uniform_dist = torch.ones_like(probs_raw[0]) / probs_raw.shape[1]
-      js_divergence = (
-        0.5
-        * (F.kl_div(torch.log(probs_raw.mean(0)), uniform_dist, reduction="sum") + F.kl_div(torch.log(uniform_dist), probs_raw.mean(0), reduction="sum")).item()
-      )
-
-      # 2. 予測の一貫性（batch内の標準偏差）
-      prediction_consistency = 1.0 - probs_raw.std(dim=0).mean().item()
-
-      # 3. 温度調整後のエントロピー
-      temp_entropy = -torch.sum(probs_temp * torch.log(probs_temp), dim=1).mean().item()
-
-      # 4. 信頼度スコア（エントロピーと最大確率の組み合わせ）
-      confidence_score = max_prob * (1.0 / (1.0 + entropy))
-
-      # 5. Non-IID指標（クラス偏り検出）
-      class_distribution = probs_raw.mean(0)
-      non_iid_score = torch.std(class_distribution).item()
-
-      return {
-        "entropy": entropy,
-        "max_prob": max_prob,
-        "logit_variance": logit_variance,
-        "temp_entropy": temp_entropy,
-        "confidence_score": confidence_score,
-        "js_divergence": js_divergence,
-        "prediction_consistency": prediction_consistency,
-        "non_iid_score": non_iid_score,
-        "concentration": 1.0 / (entropy + eps),
-      }
-
-  def _should_filter_logit(self, quality: Dict[str, float]) -> Tuple[bool, str]:
-    """ロジットをフィルタリングすべきかを判定（無効化済み）
-
-    Args:
-        quality: ロジットの品質メトリクス
-
-    Returns:
-        常に(False, "filtering_disabled")を返す
-    """
-    # 品質フィルタリングを無効化 - 全てのロジットを受け入れる
-    return False, "filtering_disabled"
-
-  def _relative_quality_filter(self, batch_qualities: List[Dict[str, float]], target_keep_ratio: float = 0.7) -> List[bool]:
-    """相対的品質に基づくフィルタリング（簡素化版）
-
-    Args:
-        batch_qualities: バッチ内の全ロジット品質リスト
-        target_keep_ratio: 保持したいロジットの割合（0.0-1.0）
-
-    Returns:
-        各ロジットを保持するかのboolean リスト
-    """
-    if not batch_qualities:
-      return []
-
-    # 信頼度スコアでソート
-    quality_scores = [(i, q["confidence_score"]) for i, q in enumerate(batch_qualities)]
-    quality_scores.sort(key=lambda x: x[1], reverse=True)
-
-    # 保持する数を計算
-    num_to_keep = max(1, int(len(batch_qualities) * target_keep_ratio))
-
-    # 上位を保持
-    keep_indices = set(idx for idx, _ in quality_scores[:num_to_keep])
-
-    return [i in keep_indices for i in range(len(batch_qualities))]
-
-  def _weighted_average_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
-    """データ対応関係を保持する加重平均ロジット集約
-
-    重要: 公開データセットとの対応関係を維持するため、バッチごとに
-    品質ベース選択 + 加重平均を行い、各バッチに対して必ず1つの集約ロジットを生成
-
-    集約方式:
-    1. バッチごとの品質評価によるクライアント選択
-    2. 選択されたクライアントロジットの加重平均計算
-    3. クライアント重みを考慮した最終集約
+  def _simple_average_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
+    """単純な算術平均によるロジット集約（重み無し）
 
     Args:
         logits_batch_lists: クライアントからのロジットバッチリスト
-        client_weights: クライアントの重み（加重平均用）
+        client_weights: クライアントの重み（未使用、互換性のために保持）
 
     Returns:
-        公開データと1:1対応する加重平均集約済みロジットリスト
+        算術平均で集約されたロジットリスト
     """
     if not logits_batch_lists:
       return []
@@ -238,113 +132,26 @@ class FedKDWeightedAvg(Strategy):
     max_batches = max(len(batches) for batches in logits_batch_lists)
 
     if min_batches != max_batches:
-      print(f"[FedKD-WA] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
-
-    # 重みを正規化
-    total_weight = sum(client_weights)
-    normalized_weights = [w / total_weight for w in client_weights]
+      print(f"[FedKD-SA] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
 
     aggregated_batches = []
-    batch_quality_metrics = []
-    total_filtered = 0
-    total_evaluated = 0
 
-    # 各バッチを個別に処理（データ対応関係保持）
+    # 各バッチを個別に処理（重み無し）
     for batch_idx in range(min_batches):
-      batch_logits_candidates = []  # (client_idx, logits, quality, weight)
+      batch_logits = []
 
-      # Step 1: このバッチの全クライアントロジットを評価
+      # このバッチの全クライアントロジットを収集
       for client_idx, client_batches in enumerate(logits_batch_lists):
         if batch_idx < len(client_batches):
-          logits = client_batches[batch_idx]
-          quality = self._evaluate_logit_quality(logits)
-          batch_logits_candidates.append((client_idx, logits, quality, normalized_weights[client_idx]))
-          total_evaluated += 1
+          batch_logits.append(client_batches[batch_idx])
 
-      if not batch_logits_candidates:
-        # このバッチにはロジットがない場合のフォールバック
-        print(f"[FedKD-WA] Warning: No logits for batch {batch_idx}")
-        continue
-
-      # Step 2: このバッチ内での相対品質評価
-      def composite_quality_score(quality_metrics):
-        """複合品質スコア（高いほど良い）"""
-        confidence = quality_metrics["confidence_score"]
-        entropy_penalty = 1.0 / (1.0 + quality_metrics["entropy"])
-        consistency = quality_metrics["prediction_consistency"]
-        return 0.4 * confidence + 0.3 * entropy_penalty + 0.3 * consistency
-
-      # 品質順でソート（降順：高品質が先頭）
-      batch_logits_candidates.sort(key=lambda x: composite_quality_score(x[2]), reverse=True)
-
-      # Step 3: 固定保持率に基づいて選択
-      num_candidates = len(batch_logits_candidates)
-      keep_ratio = 0.7  # 固定保持率
-      num_to_keep = max(1, int(num_candidates * keep_ratio))  # 最低1つは保持
-
-      selected_candidates = batch_logits_candidates[:num_to_keep]
-      filtered_count = num_candidates - num_to_keep
-      total_filtered += filtered_count
-
-      # Step 4: 選択されたロジットで重み付き集約
-      if len(selected_candidates) == 1:
-        # 1つのロジットのみ: そのまま使用
-        _, logits, quality, _ = selected_candidates[0]
-        aggregated_batches.append(logits)
-        batch_quality_metrics.append(quality)
-      else:
-        # 複数ロジット: クライアント重みベースの加重平均集約
-        batch_logits = [candidate[1] for candidate in selected_candidates]
-        batch_weights = [candidate[3] for candidate in selected_candidates]
-
-        # 加重平均用の重み正規化
-        total_batch_weight = sum(batch_weights)
-        if total_batch_weight > 0:
-          batch_weights = [w / total_batch_weight for w in batch_weights]
-
-        # 加重平均による集約（Weighted Average Aggregation）
+      if batch_logits:
+        # 単純な算術平均を計算
         stacked_logits = torch.stack(batch_logits)
-        weight_tensor = torch.tensor(batch_weights, device=stacked_logits.device).view(-1, 1, 1)
-        weighted_logits = (stacked_logits * weight_tensor).sum(dim=0)
+        averaged_logits = torch.mean(stacked_logits, dim=0)
+        aggregated_batches.append(averaged_logits)
 
-        # 集約品質を評価
-        aggregated_quality = self._evaluate_logit_quality(weighted_logits)
-        aggregated_batches.append(weighted_logits)
-        batch_quality_metrics.append(aggregated_quality)
-
-      # バッチ単位でのフィルタリング状況をログ出力（詳細モード）
-      if batch_idx % 50 == 0 or filtered_count > 0:
-        selected_clients = [candidate[0] for candidate in selected_candidates]
-        filtered_clients = [candidate[0] for candidate in batch_logits_candidates[num_to_keep:]]
-        if filtered_count > 0:
-          print(f"[FedKD-WA] Batch {batch_idx}: kept clients {selected_clients}, filtered clients {filtered_clients}")
-
-    # Step 5: 全体統計とログ出力
-    if batch_quality_metrics and total_evaluated > 0:
-      overall_quality = {
-        "confidence_score": sum(q["confidence_score"] for q in batch_quality_metrics) / len(batch_quality_metrics),
-        "entropy": sum(q["entropy"] for q in batch_quality_metrics) / len(batch_quality_metrics),
-        "non_iid_score": sum(q.get("non_iid_score", 0) for q in batch_quality_metrics) / len(batch_quality_metrics),
-        "prediction_consistency": sum(q["prediction_consistency"] for q in batch_quality_metrics) / len(batch_quality_metrics),
-      }
-
-      actual_filter_rate = total_filtered / total_evaluated * 100 if total_evaluated > 0 else 0.0
-
-      print("[FedKD-WA] === Weighted Average Aggregation Report ===")
-      print(f"  🎯 Filtering Rate: {actual_filter_rate:.1f}%")
-      print(f"  🔢 Filtered: {total_filtered}/{total_evaluated} client logits")
-      print(f"  📦 Output Batches: {len(aggregated_batches)} (= input {min_batches})")
-      print("  🔗 Data Correspondence: MAINTAINED (1:1 mapping)")
-      print(f"  📋 Avg Quality - Confidence: {overall_quality['confidence_score']:.4f}, Entropy: {overall_quality['entropy']:.4f}")
-      print("  ⚖️  Aggregation Method: Weighted Average (client performance based)")
-      print("  ============================================")
-
-      # データ対応関係の確認
-      if len(aggregated_batches) == min_batches:
-        print("  ✅ Perfect data correspondence maintained")
-      else:
-        print(f"  ⚠️  Data correspondence issue: {len(aggregated_batches)} ≠ {min_batches}")
-
+    print(f"[FedKD-SA] Successfully aggregated {len(aggregated_batches)} batches using simple average (no weights, no filtering)")
     return aggregated_batches
 
   @override
@@ -441,10 +248,10 @@ class FedKDWeightedAvg(Strategy):
     if logits_batch_lists and client_weights:
       print(f"[FedKD] Aggregating logits from {len(logits_batch_lists)} clients")
 
-      # 重み付きロジット集約を実行
-      self.avg_logits = self._weighted_average_logit_aggregation(logits_batch_lists, client_weights)
+      # 単純平均ロジット集約を実行
+      self.avg_logits = self._simple_average_logit_aggregation(logits_batch_lists, client_weights)
 
-      print(f"[FedKD-WA] Successfully aggregated {len(self.avg_logits)} batches using weighted average")
+      print(f"[FedKD-SA] Successfully aggregated {len(self.avg_logits)} batches using simple average")
     else:
       print("[FedKD] No valid logits received from clients")
 
