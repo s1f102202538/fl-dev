@@ -176,35 +176,16 @@ class FedKDWeightedAvg(Strategy):
       }
 
   def _should_filter_logit(self, quality: Dict[str, float]) -> Tuple[bool, str]:
-    """ロジットをフィルタリングすべきかを判定（簡素化版）
+    """ロジットをフィルタリングすべきかを判定（無効化済み）
 
     Args:
         quality: ロジットの品質メトリクス
 
     Returns:
-        (should_filter, reason) のタプル
+        常に(False, "filtering_disabled")を返す
     """
-    reasons = []
-
-    # エントロピー閾値チェック（低すぎる場合は除外）
-    if quality["entropy"] < self.entropy_threshold:
-      reasons.append(f"low_entropy({quality['entropy']:.3f})")
-
-    # 信頼度閾値チェック（低すぎる場合は除外）
-    if quality["confidence_score"] < self.confidence_threshold:
-      reasons.append(f"low_confidence({quality['confidence_score']:.3f})")
-
-    # 異常値検出（極端な値の場合は除外）
-    if quality["logit_variance"] > 100:  # 分散が異常に大きい
-      reasons.append(f"high_variance({quality['logit_variance']:.3f})")
-
-    if quality["js_divergence"] > 2.0:  # JS divergenceが異常に大きい
-      reasons.append(f"high_divergence({quality['js_divergence']:.3f})")
-
-    should_filter = len(reasons) > 0
-    reason = "|".join(reasons) if reasons else "high_quality"
-
-    return should_filter, reason
+    # 品質フィルタリングを無効化 - 全てのロジットを受け入れる
+    return False, "filtering_disabled"
 
   def _relative_quality_filter(self, batch_qualities: List[Dict[str, float]], target_keep_ratio: float = 0.7) -> List[bool]:
     """相対的品質に基づくフィルタリング（簡素化版）

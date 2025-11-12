@@ -172,14 +172,14 @@ class FedMoonClient(NumPyClient):
       )
 
   def _generate_and_filter_logits(self, temperature: float = 1.5) -> list:
-    """Generate and filter logits for sharing with server using enhanced filtering."""
+    """Generate and calibrate logits for sharing with server without quality filtering."""
 
     raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
     print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
 
-    # Apply enhanced filtering with temperature from server
-    filtered_logits = filter_and_calibrate_logits(raw_logits, temperature=temperature, enable_quality_filter=True, confidence_threshold=0.25)
-    print(f"[DEBUG] Enhanced filtered logits: {len(filtered_logits)} batches")
+    # Apply basic calibration without quality filtering
+    filtered_logits = filter_and_calibrate_logits(raw_logits, temperature=temperature, enable_quality_filter=False, confidence_threshold=0.25)
+    print(f"[DEBUG] Calibrated logits: {len(filtered_logits)} batches (no filtering)")
 
     return filtered_logits
 

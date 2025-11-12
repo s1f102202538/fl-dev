@@ -35,7 +35,7 @@ local-epochs = 3
 
 server-device = "cpu"
 use-wandb = true
-wandb_project_name = "fl-dev-round-30"
+wandb_project_name = "fl-dev-server-distillation-model"
 
 [tool.flwr.federations]
 default = "local-simulation"
