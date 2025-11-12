@@ -36,7 +36,7 @@ local-epochs = 3
 
 server-device = "cpu"
 use-wandb = true
-wandb_project_name = "fl-dev-cifar10"
+wandb_project_name = "fl-dev-test"
 
 [tool.flwr.federations]
 default = "local-simulation"
