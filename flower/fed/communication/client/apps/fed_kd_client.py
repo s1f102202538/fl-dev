@@ -48,7 +48,7 @@ class FedKdClient(NumPyClient):
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
     """FedKD client training with knowledge distillation and logit sharing."""
     # Optimized temperature parameter from analysis
-    temperature = float(config.get("temperature", 5.0))  # Increased from 3.0 for better distillation
+    temperature = float(config.get("temperature", 3.0))  # Increased from 3.0 for better distillation
 
     # Perform knowledge distillation if server logits are available
     if "avg_logits" in config and config["avg_logits"] is not None:
