@@ -43,7 +43,7 @@ class MoonContrastiveLearning:
       model_copy.eval()
       for param in model_copy.parameters():
         param.requires_grad = False
-      model_copy.to("cpu")
+      model_copy.to("cpu")  # CPUに移動（メモリ節約）
       self.previous_model = model_copy
 
     # グローバルモデルを保存
@@ -78,6 +78,17 @@ class MoonContrastiveLearning:
     with torch.no_grad():
       _, global_features, _ = self.global_model(images)
 
+    # 負例用の前回モデルから特徴量を取得
+    self.previous_model.to(self.device)
+    with torch.no_grad():
+      _, prev_features, _ = self.previous_model(images)
+    self.previous_model.to("cpu")  # CPUに戻す
+
+    # L2正規化（対比学習の安定性向上）
+    features = torch.nn.functional.normalize(features, p=2, dim=1)
+    global_features = torch.nn.functional.normalize(global_features, p=2, dim=1)
+    prev_features = torch.nn.functional.normalize(prev_features, p=2, dim=1)
+
     # CosineSimilarityを使用
     cos = torch.nn.CosineSimilarity(dim=-1)
 
@@ -86,17 +97,16 @@ class MoonContrastiveLearning:
     logits = posi.reshape(-1, 1)
 
     # 負例：local-previous similarity
-    self.previous_model.to(self.device)
-    with torch.no_grad():
-      _, prev_features, _ = self.previous_model(images)
-
     nega = cos(features, prev_features)
     logits = torch.cat((logits, nega.reshape(-1, 1)), dim=1)
 
-    self.previous_model.to("cpu")  # CPUに戻す
-
     # Temperature scaling
     logits /= self.temperature
+
+    # NaN/Inf check
+    if torch.isnan(logits).any() or torch.isinf(logits).any():
+      print("Warning: NaN/Inf detected in logits. Returning zero tensor.")
+      return torch.tensor(0.0, device=self.device, requires_grad=True)
 
     # ラベル：正例が0番目
     labels = torch.zeros(images.size(0), dtype=torch.long, device=self.device)
@@ -188,7 +198,13 @@ class MoonTrainer:
         # 総損失
         total_loss = loss1 + loss2
 
+        # NaN detection and handling
+        if torch.isnan(total_loss) or torch.isinf(total_loss):
+          print(f"Warning: Loss became NaN/Inf. loss1={loss1.item()}, loss2={loss2.item()}")
+          continue  # Skip this batch
+
         total_loss.backward()
+
         optimizer.step()
 
         running_loss += total_loss.item()
