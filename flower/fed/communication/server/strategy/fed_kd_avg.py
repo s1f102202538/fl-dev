@@ -18,12 +18,11 @@ from torch import Tensor
 
 
 class FedKDAvg(Strategy):
-  """Federated Knowledge Distillation with Weighted Average Logit Aggregation (FedKD-WA) strategy.
+  """Federated Knowledge Distillation with Simple Average Logit Aggregation strategy.
 
-  This strategy performs knowledge distillation using weighted average aggregation of client logits.
+  This strategy performs knowledge distillation using simple average aggregation of client logits.
   Key features:
-  - Weighted average aggregation of client logits based on client performance
-  - Quality-based filtering with batch-wise relative evaluation
+  - Simple average aggregation of client logits
   - Temperature-scaled knowledge distillation
   """
 
@@ -61,14 +60,6 @@ class FedKDAvg(Strategy):
     self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
     self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
     self.avg_logits: List[Tensor] = []
-
-    # 増分平均用の変数
-    self.cumulative_avg_logits: List[Tensor] = []  # 累積平均ロジット
-    self.round_count: int = 0  # これまでに処理したラウンド数
-
-    # 履歴強化用の変数
-    self.logit_history: List[List[Tensor]] = []  # 過去のロジット履歴（時系列平滑化用）
-    self.max_history_rounds: int = 5  # 保持する履歴ラウンド数
 
     # Simplified logit filtering parameters
     self.logit_temperature = logit_temperature
@@ -121,96 +112,6 @@ class FedKDAvg(Strategy):
     if self.use_wandb:
       # Log metrics to W&B
       wandb.log(results_dict, step=server_round)
-
-  def _update_incremental_average(self, new_logits: List[Tensor], server_round: int) -> List[Tensor]:
-    """増分平均によるロジット更新（メモリ効率の良い方式）
-
-    数式: avg_n = (avg_{n-1} * (n-1) + new_value) / n
-
-    Args:
-        new_logits: 現在のラウンドで集約されたロジット
-        server_round: 現在のサーバーラウンド
-
-    Returns:
-        更新された累積平均ロジット
-    """
-    if not new_logits:
-      return self.cumulative_avg_logits
-
-    self.round_count += 1
-
-    if not self.cumulative_avg_logits:
-      # 初回ラウンドの場合
-      self.cumulative_avg_logits = [logit.clone() for logit in new_logits]
-      print(f"[FedKD-Incremental] Round {server_round}: Initialized cumulative average with {len(self.cumulative_avg_logits)} batches")
-    else:
-      # 増分平均を計算
-      # avg_n = (avg_{n-1} * (n-1) + new_value) / n
-      for i, new_batch_logit in enumerate(new_logits):
-        if i < len(self.cumulative_avg_logits):
-          prev_avg = self.cumulative_avg_logits[i]
-          # 増分平均の計算
-          updated_avg = (prev_avg * (self.round_count - 1) + new_batch_logit) / self.round_count
-          self.cumulative_avg_logits[i] = updated_avg
-        else:
-          # 新しいバッチが追加された場合
-          self.cumulative_avg_logits.append(new_batch_logit.clone())
-
-      print(f"[FedKD-Incremental] Round {server_round}: Updated incremental average across {self.round_count} rounds")
-
-    return self.cumulative_avg_logits
-
-  def _get_enhanced_logits(self) -> List[Tensor]:
-    """履歴を考慮した強化ロジット（時系列平滑化）
-
-    時系列平滑化により、ロジットの品質と安定性を向上
-
-    Returns:
-        強化されたロジットリスト
-    """
-    if not self.logit_history:
-      return self.avg_logits
-
-    if len(self.logit_history) == 1:
-      return self.avg_logits
-
-    # 過去のロジットとの移動平均を計算
-    current_logits = self.avg_logits
-    if len(self.logit_history) >= 2:
-      prev_logits = self.logit_history[-2]
-
-      if len(current_logits) == len(prev_logits):
-        # 重み付き移動平均
-        alpha = 0.7  # 現在のロジットの重み
-        enhanced_logits = []
-
-        for curr_batch, prev_batch in zip(current_logits, prev_logits):
-          if curr_batch.shape == prev_batch.shape:
-            enhanced_batch = alpha * curr_batch + (1 - alpha) * prev_batch
-            enhanced_logits.append(enhanced_batch)
-          else:
-            enhanced_logits.append(curr_batch)
-
-        print(f"[FedKD-Enhanced] Applied temporal smoothing with {len(enhanced_logits)} batches (alpha={alpha})")
-        return enhanced_logits
-
-    return current_logits
-
-  def _update_logit_history(self, new_logits: List[Tensor]) -> None:
-    """ロジット履歴の更新（時系列平滑化用）
-
-    Args:
-        new_logits: 新しく集約されたロジット
-    """
-    if new_logits:
-      # 新しいロジットを履歴に追加
-      self.logit_history.append([logit.clone() for logit in new_logits])
-
-      # 履歴の長さを制限
-      if len(self.logit_history) > self.max_history_rounds:
-        self.logit_history.pop(0)
-
-      print(f"[FedKD-History] Updated logit history. Current history length: {len(self.logit_history)}")
 
   def _simple_average_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
     """単純な算術平均によるロジット集約（重み無し）
@@ -279,15 +180,15 @@ class FedKDAvg(Strategy):
     # 現在のラウンド情報を追加
     config["current_round"] = server_round
 
-    # 集約されたロジット（簡素化版）
-    enhanced_logits = self.avg_logits
+    # 集約されたロジット（通常の集約のみ）
+    aggregated_logits = self.avg_logits
 
     # サーバーからクライアントへの通信コスト測定
     server_to_client_mb = 0.0
 
     # 前回のラウンドで集約されたロジットがある場合のみ追加
-    if enhanced_logits:
-      logits_data = batch_list_to_base64(enhanced_logits)
+    if aggregated_logits:
+      logits_data = batch_list_to_base64(aggregated_logits)
       config["avg_logits"] = logits_data
       # ロジットデータのサイズを測定
       server_to_client_mb = calculate_data_size_mb(logits_data)
@@ -295,7 +196,7 @@ class FedKDAvg(Strategy):
       config["temperature"] = self.kd_temperature
       config["logit_temperature"] = self.logit_temperature
       print(
-        f"[FedKD] Sending {len(enhanced_logits)} enhanced logit batches (KD temp: {self.kd_temperature:.3f}, logit temp: {self.logit_temperature:.3f}, size: {server_to_client_mb:.4f} MB)"
+        f"[FedKD] Sending {len(aggregated_logits)} aggregated logit batches (KD temp: {self.kd_temperature:.3f}, logit temp: {self.logit_temperature:.3f}, size: {server_to_client_mb:.4f} MB)"
       )
     else:
       print("[FedKD] No logits available for this round")
@@ -347,24 +248,9 @@ class FedKDAvg(Strategy):
       print(f"[FedKD] Aggregating logits from {len(logits_batch_lists)} clients")
 
       # 現在のラウンドのロジット集約を実行
-      current_round_logits = self._simple_average_logit_aggregation(logits_batch_lists, client_weights)
+      self.avg_logits = self._simple_average_logit_aggregation(logits_batch_lists, client_weights)
 
-      # 増分平均で履歴を含むロジットを更新
-      self.avg_logits = self._update_incremental_average(current_round_logits, server_round)
-
-      # 履歴を更新（時系列平滑化用）
-      self._update_logit_history(self.avg_logits)
-
-      # 強化ロジットを取得（履歴を考慮した時系列平滑化）
-      enhanced_logits = self._get_enhanced_logits()
-
-      # 強化ロジットを最終的なavg_logitsとして設定
-      if enhanced_logits:
-        self.avg_logits = enhanced_logits
-
-      print(
-        f"[FedKD-Enhanced] Successfully aggregated {len(self.avg_logits)} batches using incremental average with temporal smoothing across {self.round_count} rounds"
-      )
+      print(f"[FedKD] Successfully aggregated {len(self.avg_logits)} batches using simple average aggregation")
     else:
       print("[FedKD] No valid logits received from clients")
 

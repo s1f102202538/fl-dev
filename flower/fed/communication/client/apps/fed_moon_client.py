@@ -154,9 +154,9 @@ class FedMoonClient(NumPyClient):
       return self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
-        lr=0.01,  # Optimized from analysis: reduced from 0.01 for better convergence
+        lr=0.001,  # Optimized from analysis: reduced from 0.01 for better convergence
         epochs=self.local_epochs,
-        args_optimizer="agd",  # Original paper settings
+        args_optimizer="adam",  # Original paper settings
         weight_decay=1e-4,  # Original paper settings
       )
     else:

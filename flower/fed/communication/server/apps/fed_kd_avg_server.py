@@ -5,9 +5,9 @@ from ..strategy.fed_kd_avg import FedKDAvg
 
 
 class FedKDAvgServer:
-  """Federated Knowledge Distillation Server with Weighted Average Aggregation
+  """Federated Knowledge Distillation Server with Simple Average Aggregation
 
-  This server implements FedKD strategy using weighted average aggregation of client logits.
+  This server implements FedKD strategy using simple average aggregation of client logits.
   """
 
   @staticmethod
