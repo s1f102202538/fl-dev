@@ -122,7 +122,7 @@ class OldFedMoonClient(NumPyClient):
         print("Updated Moon learner with previous round model and virtual global model")
 
       # グローバルモデル を moon 学習の起点にする
-      train_loss = self.moon_trainer.train_with_enhanced_moon(
+      train_loss = self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
         lr=0.001,

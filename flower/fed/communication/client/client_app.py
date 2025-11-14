@@ -41,11 +41,11 @@ def client_fn(context: Context) -> Client:
     public_test_data = load_public_data(data_loader_config)
 
     return FedMoonClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
-  elif client_name == "old_fed_moon_client":
+  elif client_name == "old-fed-moon-client":
     net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=use_projection_head)
     public_test_data = load_public_data(data_loader_config)
 
-    return OldFedMoonClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs)
+    return OldFedMoonClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
 
   else:
     raise ValueError(f"Unknown client name: {client_name}.")
