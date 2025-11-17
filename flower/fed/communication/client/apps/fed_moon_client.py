@@ -156,7 +156,7 @@ class FedMoonClient(NumPyClient):
         train_loader=self.train_loader,
         lr=0.001,  # Optimized from analysis: reduced from 0.01 for better convergence
         epochs=self.local_epochs,
-        args_optimizer="adam",  # Original paper settings
+        args_optimizer="sgd",  # Original paper settings
         weight_decay=1e-4,  # Original paper settings
       )
     else:
@@ -165,7 +165,7 @@ class FedMoonClient(NumPyClient):
         net=self.net,
         train_loader=self.train_loader,
         epochs=self.local_epochs,
-        lr=0.01,
+        lr=0.01,  # 0.001 の方がローカルでの学習が進まずに，全体の精度が向上する
         device=self.device,
       )
 

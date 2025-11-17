@@ -141,7 +141,7 @@ class MoonTrainer:
     train_loader,
     lr: float,
     epochs: int,
-    args_optimizer: str = "adam",
+    args_optimizer: str = "sgd",
     weight_decay: float = 1e-4,
   ) -> float:
     """FedMoon対比学習による訓練
