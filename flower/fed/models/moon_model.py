@@ -13,7 +13,7 @@ class ModelFedCon(BaseModel):
   """統一されたベースのMOONモデル（projection headあり）"""
 
   def __init__(self, base_model: str, out_dim: int = 256, n_classes: int = 10):
-    super(ModelFedCon, self).__init__()
+    super().__init__()
 
     if base_model == "mini-cnn":
       self.features = MiniCNN_header()
@@ -58,7 +58,7 @@ class ModelFedCon_noheader(BaseModel):
   """統一されたベースのMOONモデル（projection headなし）"""
 
   def __init__(self, base_model: str, n_classes: int = 10):
-    super(ModelFedCon_noheader, self).__init__()
+    super().__init__()
 
     if base_model == "mini-cnn":
       self.backbone = MiniCNN(n_classes)

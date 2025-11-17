@@ -12,12 +12,11 @@ from ..util.create_partitioner import create_partitioner
 
 def visualize_data_distribution(
   config: DataLoaderConfig,
-  num_partitions: int,
   save_path: str,
 ):
   plot_type = config.plot_type
 
-  partitioner = create_partitioner(config, num_partitions)
+  partitioner = create_partitioner(config)
 
   fds = FederatedDataset(
     dataset=config.dataset_name,

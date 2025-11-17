@@ -11,7 +11,7 @@ class SimpleCNN(BaseModel):
   """MOON論文準拠のSimpleCNN - CIFAR-10対応"""
 
   def __init__(self, output_dim: int = 10, input_dim: int = 16 * 5 * 5, hidden_dims: list = [120, 84]):
-    super(SimpleCNN, self).__init__()
+    super().__init__()
 
     # CIFAR-10用畳み込み層
     self.conv1 = nn.Conv2d(3, 6, 5)
@@ -45,7 +45,7 @@ class SimpleCNNMNIST(BaseModel):
   """MOON論文準拠のSimpleCNN - MNIST対応"""
 
   def __init__(self, output_dim: int = 10, input_dim: int = 16 * 4 * 4, hidden_dims: list = [120, 84]):
-    super(SimpleCNNMNIST, self).__init__()
+    super().__init__()
 
     # MNIST用畳み込み層
     self.conv1 = nn.Conv2d(1, 6, 5)  # kernel_size=5, no padding
@@ -80,7 +80,7 @@ class SimpleCNN_header(nn.Module):
   """MOON論文準拠のSimpleCNNヘッダー"""
 
   def __init__(self, input_dim: int = 16 * 5 * 5, hidden_dims: list = [120, 84]):
-    super(SimpleCNN_header, self).__init__()
+    super().__init__()
 
     # CIFAR-10用畳み込み層
     self.conv1 = nn.Conv2d(3, 6, 5)
@@ -109,7 +109,7 @@ class SimpleCNNMNIST_header(nn.Module):
   """MOON論文準拠のSimpleCNNヘッダー - MNIST用（特徴量抽出のみ）"""
 
   def __init__(self, input_dim: int = 16 * 4 * 4, hidden_dims: list = [120, 84], output_dim: int = 10):
-    super(SimpleCNNMNIST_header, self).__init__()
+    super().__init__()
 
     # MNIST用畳み込み層
     self.conv1 = nn.Conv2d(1, 6, 5)

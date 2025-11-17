@@ -4,8 +4,8 @@ import copy
 from typing import Dict, Tuple
 
 import torch
-from fed.algorithms.distillation import Distillation
-from fed.algorithms.moon import MoonContrastiveLearning, MoonTrainer
+from fed.algorithms.old_distillation import OldDistillation
+from fed.algorithms.old_moon import OldMoonContrastiveLearning, OldMoonTrainer
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
 from fed.util.model_util import (
@@ -48,14 +48,14 @@ class OldFedMoonClient(NumPyClient):
     self.global_model_name = "global-model"
 
     # Moon対比学習の初期化
-    self.moon_learner = MoonContrastiveLearning(
+    self.moon_learner = OldMoonContrastiveLearning(
       mu=1.0,
       temperature=0.5,
       device=self.device,
     )
 
     # Moonトレーナーの初期化
-    self.moon_trainer = MoonTrainer(
+    self.moon_trainer = OldMoonTrainer(
       moon_learner=self.moon_learner,
       device=self.device,
     )
@@ -94,7 +94,7 @@ class OldFedMoonClient(NumPyClient):
         logits = base64_to_batch_list(config["avg_logits"])
 
         # 蒸留により仮想グローバルモデルを直接作成
-        distillation = Distillation(
+        distillation = OldDistillation(
           studentModel=distillation_base_model,  # グローバルモデルまたは現在のモデルを使用
           public_data=self.public_test_data,
           soft_targets=logits,
@@ -122,7 +122,7 @@ class OldFedMoonClient(NumPyClient):
         print("Updated Moon learner with previous round model and virtual global model")
 
       # グローバルモデル を moon 学習の起点にする
-      train_loss = self.moon_trainer.train_with_moon(
+      train_loss = self.moon_trainer.train_with_enhanced_moon(
         model=self.net,
         train_loader=self.train_loader,
         lr=0.001,

@@ -169,7 +169,7 @@ def main():
       try:
         print(f"  Generating {plot_type} visualization...")
         if current_filename:
-          visualize_data_distribution(config, args.partitions, current_filename)
+          visualize_data_distribution(config, current_filename)
 
         if current_filename:
           if plot_type == "heatmap":
