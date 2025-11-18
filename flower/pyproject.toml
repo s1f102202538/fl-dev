@@ -28,7 +28,7 @@ clientapp = "fed.communication.client.client_app:app"
 model_name = "mini-cnn"
 dataset_name = "uoft-cs/cifar10"
 client_name = "fed-moon-client"
-server_name = "fed-kd-avg-server"
+server_name = "fed-kd-public-distillation-server"
 
 num-server-rounds = 10
 local-epochs = 3

@@ -122,7 +122,7 @@ class FedMoonClient(NumPyClient):
 
     # Train virtual global model with optimized FedKD parameters
     self.virtual_global_model = distillation.train_knowledge_distillation(
-      epochs=3,  # Increased from 3 for better distillation
+      epochs=10,  # Increased from 3 for better distillation
       learning_rate=0.001,  # Reduced from 0.01 for more stable training
       T=temperature,
       alpha=0.7,  # FedKD paper: KL distillation loss weight
