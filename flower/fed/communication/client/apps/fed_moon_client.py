@@ -45,7 +45,7 @@ class FedMoonClient(NumPyClient):
 
     # Initialize Moon contrastive learning with optimized parameters
     self.moon_learner = MoonContrastiveLearning(
-      mu=1.0,
+      mu=1.0,  # 1.0 の方がよい可能性
       temperature=0.5,  # Optimized from analysis: best performance at temp=0.5
       device=self.device,
     )
@@ -122,7 +122,7 @@ class FedMoonClient(NumPyClient):
 
     # Train virtual global model with optimized FedKD parameters
     self.virtual_global_model = distillation.train_knowledge_distillation(
-      epochs=5,  # Increased from 3 for better distillation
+      epochs=3,  # Increased from 3 for better distillation
       learning_rate=0.001,  # Reduced from 0.01 for more stable training
       T=temperature,
       alpha=0.7,  # FedKD paper: KL distillation loss weight
@@ -157,7 +157,7 @@ class FedMoonClient(NumPyClient):
         lr=0.001,  # Optimized from analysis: reduced from 0.01 for better convergence
         epochs=self.local_epochs,
         args_optimizer="sgd",  # Original paper settings
-        weight_decay=1e-4,  # Original paper settings
+        weight_decay=1e-5,  # Original paper settings
       )
     else:
       print("[INFO] No previous model available, performing normal training")
@@ -165,7 +165,7 @@ class FedMoonClient(NumPyClient):
         net=self.net,
         train_loader=self.train_loader,
         epochs=self.local_epochs,
-        lr=0.01,  # 0.001 の方がローカルでの学習が進まずに，全体の精度が向上する
+        lr=0.001,
         device=self.device,
       )
 

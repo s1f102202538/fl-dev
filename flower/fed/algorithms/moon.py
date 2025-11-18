@@ -11,7 +11,7 @@ class MoonContrastiveLearning:
 
   def __init__(
     self,
-    mu: float = 1.0,
+    mu: float = 5.0,
     temperature: float = 0.5,
     device: torch.device | None = None,
   ):
@@ -142,7 +142,7 @@ class MoonTrainer:
     lr: float,
     epochs: int,
     args_optimizer: str = "sgd",
-    weight_decay: float = 1e-4,
+    weight_decay: float = 1e-5,
   ) -> float:
     """FedMoon対比学習による訓練
 
@@ -204,6 +204,8 @@ class MoonTrainer:
           continue  # Skip this batch
 
         total_loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
         optimizer.step()
 

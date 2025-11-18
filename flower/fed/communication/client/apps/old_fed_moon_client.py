@@ -49,7 +49,7 @@ class OldFedMoonClient(NumPyClient):
 
     # Moon対比学習の初期化
     self.moon_learner = OldMoonContrastiveLearning(
-      mu=1.0,
+      mu=1.0,  # 1.0
       temperature=0.5,
       device=self.device,
     )

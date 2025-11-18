@@ -2,7 +2,6 @@ from typing import Callable, Tuple
 
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
-from fed.util.create_model import create_model
 from fed.util.model_util import get_weights, set_weights, weighted_average
 from flwr.common import ndarrays_to_parameters
 from flwr.common.typing import NDArrays, UserConfig
