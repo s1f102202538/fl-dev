@@ -57,7 +57,46 @@ class Distillation:
 
     return loss
 
+  def _check_early_stopping(self, current_loss: float, best_loss: float, patience_counter: int, patience: int) -> tuple[bool, float, int]:
+    """Early stoppingのチェックを行う
+
+    Args:
+        current_loss: 現在のエポックの損失
+        best_loss: これまでの最良損失
+        patience_counter: 改善が見られないエポック数のカウンター
+        patience: 早期終了までの許容エポック数
+
+    Returns:
+        tuple: (early_stopフラグ, 更新された最良損失, 更新されたカウンター)
+    """
+    # 損失が改善した場合
+    if current_loss < best_loss:
+      best_loss = current_loss
+      patience_counter = 0
+      return False, best_loss, patience_counter
+
+    # 損失が改善しなかった場合
+    patience_counter += 1
+    if patience_counter >= patience:
+      print(f"Early stopping triggered: No improvement for {patience} epochs")
+      return True, best_loss, patience_counter
+
+    return False, best_loss, patience_counter
+
   def train_knowledge_distillation(self, epochs: int, learning_rate: float, T: float, alpha: float, beta: float, device: torch.device) -> BaseModel:
+    """知識蒸留による訓練を実行
+
+    Args:
+        epochs: 訓練エポック数
+        learning_rate: 学習率
+        T: 蒸留温度
+        alpha: KL蒸留損失の重み
+        beta: CE損失の重み
+        device: 計算デバイス
+
+    Returns:
+        訓練済みの生徒モデル
+    """
     # 損失関数と最適化アルゴリズム
     ce_loss = nn.CrossEntropyLoss()
     optimizer = Adam(self.studentModel.parameters(), lr=learning_rate)
@@ -66,6 +105,11 @@ class Distillation:
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
 
     self.studentModel.train()  # 生徒モデルを学習モードに設定
+
+    # Early stopping用の変数（固定patience=5）
+    best_loss = float("inf")
+    patience_counter = 0
+    early_stopping_patience = 5  # 固定値: 5エポック改善なしで停止
 
     if self.is_batch_list:
       # ソフトターゲットをデバイスに移動
@@ -125,6 +169,12 @@ class Distillation:
           epoch_loss = running_loss / batch_count
           scheduler.step(epoch_loss)
           print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
+
+          # Early stoppingのチェック
+          should_stop, best_loss, patience_counter = self._check_early_stopping(epoch_loss, best_loss, patience_counter, early_stopping_patience)
+          if should_stop:
+            print(f"Early stopping at epoch {epoch + 1}/{epochs}")
+            break
         else:
           print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}: No valid batches processed")
 
