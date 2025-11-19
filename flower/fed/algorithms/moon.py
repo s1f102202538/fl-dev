@@ -11,7 +11,7 @@ class MoonContrastiveLearning:
 
   def __init__(
     self,
-    mu: float = 1.0,
+    mu: float = 5.0,
     temperature: float = 0.5,
     device: torch.device | None = None,
   ):
@@ -28,24 +28,23 @@ class MoonContrastiveLearning:
 
     # 対比学習のためのモデル
     self.global_model = None
-    self.previous_models = []  # 複数の前回モデルを保持
+    self.previous_model = None  # 単一の前回モデルを保持
 
-  def update_models(self, previous_models: list[BaseModel], global_model: BaseModel) -> None:
+  def update_models(self, previous_model: BaseModel, global_model: BaseModel) -> None:
     """グローバルモデルと前回モデルの状態を更新
 
     Args:
-        previous_models: 前回のローカルモデルのリスト
+        previous_model: 前回のローカルモデル
         global_model: グローバルモデル
     """
     # 前回のローカルモデルを保存
-    self.previous_models = []
-    for prev_model in previous_models:
-      model_copy = copy.deepcopy(prev_model)
+    if previous_model is not None:
+      model_copy = copy.deepcopy(previous_model)
       model_copy.eval()
       for param in model_copy.parameters():
         param.requires_grad = False
       model_copy.to("cpu")  # CPUに移動（メモリ節約）
-      self.previous_models.append(model_copy)
+      self.previous_model = model_copy
 
     # グローバルモデルを保存
     if self.global_model is None:
@@ -59,7 +58,8 @@ class MoonContrastiveLearning:
       param.requires_grad = False
     self.global_model.to(self.device)  # デバイスに移動
 
-    print(f"MOON models updated: mu={self.mu}, temperature={self.temperature}, prev_models={len(self.previous_models)}")
+    has_previous = self.previous_model is not None
+    print(f"MOON models updated: mu={self.mu}, temperature={self.temperature}, has_previous_model={has_previous}")
 
   def compute_contrastive_loss(self, features: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
     """対比損失計算
@@ -71,12 +71,23 @@ class MoonContrastiveLearning:
     Returns:
         対比損失テンソル
     """
-    if self.global_model is None or len(self.previous_models) == 0:
+    if self.global_model is None or self.previous_model is None:
       return torch.tensor(0.0, device=self.device, requires_grad=True)
 
     # グローバルモデルから特徴量を取得
     with torch.no_grad():
       _, global_features, _ = self.global_model(images)
+
+    # 負例用の前回モデルから特徴量を取得
+    self.previous_model.to(self.device)
+    with torch.no_grad():
+      _, prev_features, _ = self.previous_model(images)
+    self.previous_model.to("cpu")  # CPUに戻す
+
+    # L2正規化（対比学習の安定性向上）
+    features = torch.nn.functional.normalize(features, p=2, dim=1)
+    global_features = torch.nn.functional.normalize(global_features, p=2, dim=1)
+    prev_features = torch.nn.functional.normalize(prev_features, p=2, dim=1)
 
     # CosineSimilarityを使用
     cos = torch.nn.CosineSimilarity(dim=-1)
@@ -85,19 +96,17 @@ class MoonContrastiveLearning:
     posi = cos(features, global_features)
     logits = posi.reshape(-1, 1)
 
-    # 負例：local-previous similarities
-    for prev_model in self.previous_models:
-      prev_model.to(self.device)
-      with torch.no_grad():
-        _, prev_features, _ = prev_model(images)
-
-      nega = cos(features, prev_features)
-      logits = torch.cat((logits, nega.reshape(-1, 1)), dim=1)
-
-      prev_model.to("cpu")  # CPUに戻す
+    # 負例：local-previous similarity
+    nega = cos(features, prev_features)
+    logits = torch.cat((logits, nega.reshape(-1, 1)), dim=1)
 
     # Temperature scaling
     logits /= self.temperature
+
+    # NaN/Inf check
+    if torch.isnan(logits).any() or torch.isinf(logits).any():
+      print("Warning: NaN/Inf detected in logits. Returning zero tensor.")
+      return torch.tensor(0.0, device=self.device, requires_grad=True)
 
     # ラベル：正例が0番目
     labels = torch.zeros(images.size(0), dtype=torch.long, device=self.device)
@@ -133,7 +142,7 @@ class MoonTrainer:
     lr: float,
     epochs: int,
     args_optimizer: str = "sgd",
-    weight_decay: float = 1e-4,
+    weight_decay: float = 1e-5,
   ) -> float:
     """FedMoon対比学習による訓練
 
@@ -182,14 +191,22 @@ class MoonTrainer:
 
         # 対比損失
         loss2 = torch.tensor(0.0, device=self.device)
-        if self.moon_learner.global_model is not None and len(self.moon_learner.previous_models) > 0:
+        if self.moon_learner.global_model is not None and self.moon_learner.previous_model is not None:
           contrastive_loss = self.moon_learner.compute_contrastive_loss(proj, images)
           loss2 = self.moon_learner.mu * contrastive_loss
 
         # 総損失
         total_loss = loss1 + loss2
 
+        # NaN detection and handling
+        if torch.isnan(total_loss) or torch.isinf(total_loss):
+          print(f"Warning: Loss became NaN/Inf. loss1={loss1.item()}, loss2={loss2.item()}")
+          continue  # Skip this batch
+
         total_loss.backward()
+
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         optimizer.step()
 
         running_loss += total_loss.item()

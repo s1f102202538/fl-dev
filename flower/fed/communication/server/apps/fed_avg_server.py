@@ -2,7 +2,6 @@ from typing import Callable, Tuple
 
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
-from fed.util.create_model import create_model
 from fed.util.model_util import get_weights, set_weights, weighted_average
 from flwr.common import ndarrays_to_parameters
 from flwr.common.typing import NDArrays, UserConfig
@@ -35,17 +34,7 @@ class FedAvgServer:
     return {"lr": lr}
 
   @staticmethod
-  def create_server(model_name: str, use_wandb: bool, run_config, server_device: device, num_rounds: int, testloader: DataLoader) -> ServerAppComponents:
-    # 統一されたモデルを使用するかどうかを設定から取得
-    unified_model = run_config.get("unified_model", False)
-    n_classes = run_config.get("n_classes", 10)
-    out_dim = run_config.get("out_dim", 256)
-
-    if unified_model:
-      net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=False)
-    else:
-      net = create_model(model_name, n_classes=n_classes)
-
+  def create_server(net: BaseModel, use_wandb: bool, run_config, server_device: device, num_rounds: int, testloader: DataLoader) -> ServerAppComponents:
     parameters = ndarrays_to_parameters(get_weights(net))
 
     # Define strategy

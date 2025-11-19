@@ -69,5 +69,5 @@ class DataLoaderConfig:
   # Public dataset configuration
   public_max_samples: int = 5000
 
-  # Evaluation dataset configuration
-  eval_test_samples: int = 1000  # Number of test samples for evaluation
+  # Evaluation dataset configuration (use more data for stable accuracy measurement)
+  eval_test_samples: int = 5000  # Use 5000 samples for more reliable accuracy evaluation

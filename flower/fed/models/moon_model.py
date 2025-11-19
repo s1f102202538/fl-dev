@@ -12,8 +12,8 @@ from .simple_cnn import SimpleCNN, SimpleCNN_header, SimpleCNNMNIST, SimpleCNNMN
 class ModelFedCon(BaseModel):
   """統一されたベースのMOONモデル（projection headあり）"""
 
-  def __init__(self, base_model: str, out_dim: int = 256, n_classes: int = 10, net_configs=None):
-    super(ModelFedCon, self).__init__()
+  def __init__(self, base_model: str, out_dim: int = 256, n_classes: int = 10):
+    super().__init__()
 
     if base_model == "mini-cnn":
       self.features = MiniCNN_header()
@@ -57,8 +57,8 @@ class ModelFedCon(BaseModel):
 class ModelFedCon_noheader(BaseModel):
   """統一されたベースのMOONモデル（projection headなし）"""
 
-  def __init__(self, base_model: str, n_classes: int = 10, net_configs=None):
-    super(ModelFedCon_noheader, self).__init__()
+  def __init__(self, base_model: str, n_classes: int = 10):
+    super().__init__()
 
     if base_model == "mini-cnn":
       self.backbone = MiniCNN(n_classes)
@@ -74,8 +74,13 @@ class ModelFedCon_noheader(BaseModel):
   def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
     # backbone（完全なモデル）を使用
     y = self.backbone(x)
-    # MOONアルゴリズムに必要な形式で返す（特徴なし、予測結果のみ）
-    return y, y, y
+
+    # projection headがない場合の特徴量抽出
+    # 最終層の前の特徴量を取得するのが理想だが、ここでは単純化して最終出力を特徴量として使用
+    h = y
+    proj = y
+
+    return h, proj, y
 
   @override
   def predict(self, x: Tensor) -> Tensor:

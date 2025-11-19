@@ -64,14 +64,13 @@ def base64_to_batch_list(b64str: str) -> List[Tensor]:
 
 
 def filter_and_calibrate_logits(logit_batches: List[Tensor]) -> List[Tensor]:
-  """ロジットの品質フィルタリングと較正処理
+  """ロジットの基本的な較正処理（元の簡素版に復元）
 
   Args:
-      logit_batches: フィルタリング対象のロジットバッチリスト
-      temperature: 温度スケーリングのパラメータ
+      logit_batches: 較正対象のロジットバッチリスト
 
   Returns:
-      フィルタリング・較正されたロジットバッチリスト
+      較正されたロジットバッチリスト
   """
   filtered_logits = []
   for batch in logit_batches:
@@ -80,7 +79,7 @@ def filter_and_calibrate_logits(logit_batches: List[Tensor]) -> List[Tensor]:
       print("警告: ロジット内のNaN/Infを検出、ゼロで置換")
       batch = torch.zeros_like(batch)
 
-    # 極値のクリッピング
+    # 極値のクリッピング（元の設定）
     calibrated_batch = torch.clamp(batch, min=-10, max=10)
 
     filtered_logits.append(calibrated_batch)

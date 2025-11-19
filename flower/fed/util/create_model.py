@@ -20,7 +20,7 @@ def create_model(model_name: str, is_moon: bool = False, out_dim: int = 256, n_c
       is_moon: MOONモデルを使用するかどうか
       out_dim: 投影ヘッドの出力次元
       n_classes: クラス数
-      use_projection_head: 投影ヘッドを使用するかどうか（MOONのみ）
+      use_projection_head: 投影ヘッドを使用するかどうか
   """
   if is_moon:
     if use_projection_head:

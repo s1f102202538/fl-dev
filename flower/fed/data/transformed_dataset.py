@@ -2,8 +2,8 @@ from PIL import Image
 from torch.utils.data import Dataset
 
 
-class PublicDataset(Dataset):
-  """PyTorch Dataset wrapper for public dataset with transforms."""
+class TransformedDataset(Dataset):
+  """PyTorch Dataset wrapper for Hugging Face datasets with transforms."""
 
   def __init__(self, hf_dataset, transform=None):
     self.hf_dataset = hf_dataset

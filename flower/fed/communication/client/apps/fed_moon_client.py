@@ -8,13 +8,7 @@ from fed.algorithms.distillation import Distillation
 from fed.algorithms.moon import MoonContrastiveLearning, MoonTrainer
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
-from fed.util.model_util import (
-  base64_to_batch_list,
-  batch_list_to_base64,
-  filter_and_calibrate_logits,
-  load_model_from_state,
-  save_model_to_state,
-)
+from fed.util.model_util import base64_to_batch_list, batch_list_to_base64, filter_and_calibrate_logits, load_model_from_state, save_model_to_state
 from flwr.client import NumPyClient
 from flwr.common import RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
@@ -22,7 +16,7 @@ from torch.utils.data import DataLoader
 
 
 class FedMoonClient(NumPyClient):
-  """ロジット共有機能を持つFedMoonクライアント"""
+  """FedMoon client with logit sharing capabilities."""
 
   def __init__(
     self,
@@ -43,116 +37,52 @@ class FedMoonClient(NumPyClient):
     self.net.to(self.device)
     self.public_test_data = public_test_data
 
-    # モデル状態保存用の名前定義
+    self.virtual_global_model = net
+
+    # Model state storage keys
     self.local_model_name = "local-model"
     self.global_model_name = "global-model"
 
-    # Moon対比学習の初期化
+    # Initialize Moon contrastive learning with optimized parameters
     self.moon_learner = MoonContrastiveLearning(
-      mu=5.0,
-      temperature=0.5,
+      mu=1.0,  # 1.0 の方がよい可能性
+      temperature=0.5,  # Optimized from analysis: best performance at temp=0.5
       device=self.device,
     )
 
-    # Moonトレーナーの初期化
+    # Initialize Moon trainer
     self.moon_trainer = MoonTrainer(
       moon_learner=self.moon_learner,
       device=self.device,
     )
 
-    # 前回モデルの履歴
-    self.previous_models = []
-
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    """拡張FedMoon対比学習と適応ロジット共有によるローカルモデル訓練"""
+    """FedMoon client training with logit sharing and contrastive learning."""
     temperature = float(config.get("temperature", 3.0))
 
-    previous_round_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
-    # 現在のローカルモデル状態を復元
+    # Load previous round model if available
+    previous_round_model = self._load_previous_round_model()
+
+    # Perform knowledge distillation if logits are available
+    if "avg_logits" in config and config["avg_logits"] is not None:
+      self._perform_knowledge_distillation(config["avg_logits"], temperature)
+
+    # Update model history for MOON if not first round
     if previous_round_model is not None:
-      print("[DEBUG] Previous round model loaded successfully")
-    else:
-      print("[DEBUG] No previous model found, using initial model")
+      self._update_model_history(previous_round_model)
 
-    if previous_round_model is None:
-      print("[INFO] First round: Performing normal training without Moon contrastive learning")
-      train_loss = CNNTask.train(
-        net=self.net,
-        train_loader=self.train_loader,
-        epochs=self.local_epochs,
-        lr=0.01,
-        device=self.device,
-      )
-    else:
-      if "avg_logits" in config and config["avg_logits"] is not None:
-        # 蒸留には保存されたグローバルモデルを使用
-        global_model_for_distillation = load_model_from_state(self.client_state, self.net, self.global_model_name)
-        if global_model_for_distillation is not None:
-          distillation_base_model = global_model_for_distillation
-          print("[DEBUG] Using saved global model for knowledge distillation")
-        else:
-          distillation_base_model = copy.deepcopy(self.net)
-          print("[DEBUG] No saved global model found, using current model for distillation")
+    # Perform training (normal or MOON based on available history)
+    train_loss = self._perform_training()
 
-        logits = base64_to_batch_list(config["avg_logits"])
-
-        # 蒸留により仮想グローバルモデルを直接作成
-        distillation = Distillation(
-          studentModel=distillation_base_model,  # グローバルモデルまたは現在のモデルを使用
-          public_data=self.public_test_data,
-          soft_targets=logits,
-        )
-
-        # FedKD論文に基づく知識蒸留パラメータで仮想グローバルモデルを作成
-        virtual_global_model = distillation.train_knowledge_distillation(
-          epochs=3,
-          learning_rate=0.01,
-          T=temperature,
-          alpha=0.7,  # FedKD論文: KL蒸留損失の重み
-          beta=0.3,  # FedKD論文: CE損失の重み
-          device=self.device,
-        )
-        virtual_global_model.to(self.device)
-
-        # グローバルモデル を moon 学習の起点にする
-        self.net = virtual_global_model
-
-        # 蒸留後のモデルをグローバルモデルとして保存
-        save_model_to_state(virtual_global_model, self.client_state, self.global_model_name)
-        print("[DEBUG] Distilled model saved as global model")
-
-        # Moon対比学習の前回モデルを更新
-        self.previous_models.append(previous_round_model)
-        # モデル履歴の管理
-        if len(self.previous_models) > 3:  # 最大3つの前回モデルを保持
-          self.previous_models.pop(0)
-
-        self.moon_learner.update_models(self.previous_models, virtual_global_model)
-        print(f"Updated Moon learner with {len(self.previous_models)} previous models and virtual global model")
-
-      # グローバルモデル を moon 学習の起点にする
-      train_loss = self.moon_trainer.train_with_moon(
-        model=self.net,
-        train_loader=self.train_loader,
-        lr=0.01,
-        epochs=self.local_epochs,
-        args_optimizer="sgd",  # 元論文準拠
-        weight_decay=1e-4,  # 元論文準拠
-      )
-
-    # 学習完了後のローカルモデル状態を保存
+    # Save current model state for next round
     save_model_to_state(self.net, self.client_state, self.local_model_name)
 
-    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
-    # ロジットのフィルタリングと較正処理
-    filtered_logits = filter_and_calibrate_logits(raw_logits)
-    print(f"[DEBUG] Filtered logits: {len(filtered_logits)} batches")
+    filtered_logits = self._generate_and_filter_logits()
 
     print(f"Client training loss: {train_loss:.4f}")
 
     return (
-      [],  # ロジット共有のみでパラメータ集約は行わないため空リストを返す
+      [],  # Empty list for logit-only sharing (no parameter aggregation)
       len(self.train_loader.dataset),  # type: ignore
       {
         "train_loss": train_loss,
@@ -160,13 +90,104 @@ class FedMoonClient(NumPyClient):
       },
     )
 
-  def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
-    """性能追跡による拡張モデル評価"""
+  def _load_previous_round_model(self) -> BaseModel | None:
+    """Load the model from the previous training round."""
+    previous_round_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
+    if previous_round_model is not None:
+      print("[DEBUG] Previous round model loaded successfully")
+    else:
+      print("[DEBUG] No previous model found, using initial model")
+    return previous_round_model
 
-    # モデルをロードする
+  def _perform_knowledge_distillation(self, avg_logits: str, temperature: float) -> None:
+    """Perform knowledge distillation to create virtual global model."""
+
+    # Use saved global model for distillation if available
+    global_model_for_distillation = load_model_from_state(self.client_state, self.net, self.global_model_name)
+    if global_model_for_distillation is not None:
+      distillation_base_model = global_model_for_distillation
+      print("[DEBUG] Using saved global model for knowledge distillation")
+    else:
+      distillation_base_model = copy.deepcopy(self.net)
+      print("[DEBUG] No saved global model found, using current model for distillation")
+
+    logits = base64_to_batch_list(avg_logits)
+
+    # Create virtual global model through distillation
+    distillation = Distillation(
+      studentModel=distillation_base_model,
+      public_data=self.public_test_data,
+      soft_targets=logits,
+    )
+
+    # Train virtual global model with optimized FedKD parameters
+    self.virtual_global_model = distillation.train_knowledge_distillation(
+      epochs=5,  # Increased from 3 for better distillation
+      learning_rate=0.001,  # Reduced from 0.01 for more stable training
+      T=temperature,
+      alpha=0.7,  # FedKD paper: KL distillation loss weight
+      beta=0.3,  # FedKD paper: CE loss weight
+      device=self.device,
+    )
+
+    # Use virtual global model as starting point for MOON learning
+    self.net = self.virtual_global_model
+
+    # Save distilled model as global model
+    save_model_to_state(self.virtual_global_model, self.client_state, self.global_model_name)
+    print("[DEBUG] Distilled model saved as global model")
+
+  def _update_model_history(self, previous_round_model: BaseModel) -> None:
+    """Update model history for MOON contrastive learning."""
+    if self.virtual_global_model is None:
+      self.virtual_global_model = self.net
+
+    # MOON対比学習の設定
+    self.moon_learner.update_models(previous_round_model, self.virtual_global_model)
+    print("Updated Moon learner with 1 previous model and virtual global model")
+
+  def _perform_training(self) -> float:
+    """Perform training using normal or MOON approach based on available model history."""
+    # MOON学習が可能かチェック
+    if self.moon_learner.previous_model is not None and self.moon_learner.global_model is not None:
+      print("[INFO] Performing MOON training with previous model")
+      return self.moon_trainer.train_with_moon(
+        model=self.net,
+        train_loader=self.train_loader,
+        lr=0.001,  # Optimized from analysis: reduced from 0.01 for better convergence
+        epochs=self.local_epochs,
+        args_optimizer="sgd",  # Original paper settings
+        weight_decay=1e-5,  # Original paper settings
+      )
+    else:
+      print("[INFO] No previous model available, performing normal training")
+      return CNNTask.train(
+        net=self.net,
+        train_loader=self.train_loader,
+        epochs=self.local_epochs,
+        lr=0.001,
+        device=self.device,
+      )
+
+  def _generate_and_filter_logits(self) -> list:
+    """Generate and calibrate logits for sharing with server without quality filtering."""
+
+    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
+    print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
+
+    # Apply basic calibration without quality filtering
+    filtered_logits = filter_and_calibrate_logits(raw_logits)
+    print(f"[DEBUG] Calibrated logits: {len(filtered_logits)} batches (no filtering)")
+
+    return filtered_logits
+
+  def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
+    """Evaluate model performance with performance tracking."""
+    # Load the trained model
     loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     if loaded_model is not None:
       self.net = loaded_model
+      print("[DEBUG] Model loaded successfully for evaluation")
     else:
       print("[Warning] No saved model state found, using initial model")
 

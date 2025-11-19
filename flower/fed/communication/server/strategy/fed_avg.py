@@ -31,6 +31,10 @@ class CustomFedAvg(FedAvg):
     self.net = net
     self.save_path, self.run_dir = create_run_dir(run_config)
     self.use_wandb = use_wandb
+
+    # Store model creation parameters for proper model initialization
+    self.model_config = run_config
+
     # Initialise W&B if set
     if use_wandb:
       self._init_wandb_project()
@@ -81,7 +85,19 @@ class CustomFedAvg(FedAvg):
       # model and save the state dict.
       # Converts flwr.common.Parameters to ndarrays
       ndarrays = parameters_to_ndarrays(parameters)
-      model = type(self.net)()
+
+      # Create new model instance using the same configuration
+      from fed.util.create_model import create_model
+
+      # Use the same model creation logic as the original net
+      model = create_model(
+        model_name=str(self.model_config.get("model_name", "mini-cnn")),
+        is_moon=bool(self.model_config.get("is_moon", True)),
+        out_dim=int(self.model_config.get("out_dim", 256)),
+        n_classes=int(self.model_config.get("n_classes", 10)),
+        use_projection_head=bool(self.model_config.get("use_projection_head", True)),
+      )
+
       set_weights(model, ndarrays)
       # Save the PyTorch model
       file_name = f"model_state_acc_{accuracy}_round_{round}.pth"

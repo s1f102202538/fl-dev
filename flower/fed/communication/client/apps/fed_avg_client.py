@@ -6,7 +6,7 @@ from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
 from fed.util.model_util import get_weights, set_weights
 from flwr.client import NumPyClient
-from flwr.common import ArrayRecord, RecordDict
+from flwr.common import RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
@@ -63,6 +63,5 @@ class FedAvgClient(NumPyClient):
     last time it trained the model.
     """
     set_weights(self.net, parameters)
-
     loss, accuracy = CNNTask.test(self.net, self.val_loader, self.device)
     return loss, len(self.val_loader.dataset), {"accuracy": accuracy}  # type: ignore

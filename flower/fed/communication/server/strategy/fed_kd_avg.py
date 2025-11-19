@@ -17,8 +17,14 @@ from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor
 
 
-class FedKD(Strategy):
-  """Federated Knowledge Distillation (FedKD) strategy."""
+class FedKDAvg(Strategy):
+  """Federated Knowledge Distillation with Simple Average Logit Aggregation strategy.
+
+  This strategy performs knowledge distillation using simple average aggregation of client logits.
+  Key features:
+  - Simple average aggregation of client logits
+  - Temperature-scaled knowledge distillation
+  """
 
   def __init__(
     self,
@@ -36,8 +42,11 @@ class FedKD(Strategy):
     evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
     run_config: UserConfig,
     use_wandb: bool = False,
-    kd_temperature: float = 3.0,
-    max_history_rounds: int = 3,
+    # Simplified logit filtering parameters
+    logit_temperature: float = 3.0,  # 温度スケーリングパラメータ
+    kd_temperature: float = 5.0,  # 知識蒸留用温度
+    entropy_threshold: float = 0.01,  # エントロピー閾値（最小品質保証用）
+    confidence_threshold: float = 0.08,  # 信頼度閾値（現実的な学習初期値）
   ) -> None:
     self.fraction_fit = fraction_fit
     self.fraction_evaluate = fraction_evaluate
@@ -52,12 +61,11 @@ class FedKD(Strategy):
     self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
     self.avg_logits: List[Tensor] = []
 
-    self.max_history_rounds = max_history_rounds
-
-    # ロジット履歴とメトリクス
-    self.logit_history: List[List[Tensor]] = []
+    # Simplified logit filtering parameters
+    self.logit_temperature = logit_temperature
+    self.entropy_threshold = entropy_threshold
+    self.confidence_threshold = confidence_threshold
     self.kd_temperature = kd_temperature
-    self.round_metrics = []
 
     self.save_path, self.run_dir = create_run_dir(run_config)
     self.use_wandb = use_wandb
@@ -65,9 +73,6 @@ class FedKD(Strategy):
     # Initialise W&B if set
     if use_wandb:
       self._init_wandb_project()
-
-    # Keep track of best acc
-    self.best_acc_so_far = 0.0
 
     # A dictionary to store results as they come
     self.results: Dict = {}
@@ -108,8 +113,16 @@ class FedKD(Strategy):
       # Log metrics to W&B
       wandb.log(results_dict, step=server_round)
 
-  def _weighted_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
-    """重み付きロジット集約"""
+  def _simple_average_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
+    """単純な算術平均によるロジット集約（重み無し）
+
+    Args:
+        logits_batch_lists: クライアントからのロジットバッチリスト
+        client_weights: クライアントの重み（未使用、互換性のために保持）
+
+    Returns:
+        算術平均で集約されたロジットリスト
+    """
     if not logits_batch_lists:
       return []
 
@@ -118,82 +131,27 @@ class FedKD(Strategy):
     max_batches = max(len(batches) for batches in logits_batch_lists)
 
     if min_batches != max_batches:
-      print(f"[FedKD] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
-
-    # 重みを正規化
-    total_weight = sum(client_weights)
-    normalized_weights = [w / total_weight for w in client_weights]
+      print(f"[FedKD-SA] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
 
     aggregated_batches = []
 
+    # 各バッチを個別に処理（重み無し）
     for batch_idx in range(min_batches):
       batch_logits = []
-      batch_weights = []
 
+      # このバッチの全クライアントロジットを収集
       for client_idx, client_batches in enumerate(logits_batch_lists):
         if batch_idx < len(client_batches):
-          logits = client_batches[batch_idx]
-
-          batch_logits.append(logits)
-          batch_weights.append(normalized_weights[client_idx])
+          batch_logits.append(client_batches[batch_idx])
 
       if batch_logits:
-        # 重み付き平均を計算
-        if len(batch_weights) > 1:
-          # 重みを再正規化
-          total_batch_weight = sum(batch_weights)
-          batch_weights = [w / total_batch_weight for w in batch_weights]
+        # 単純な算術平均を計算
+        stacked_logits = torch.stack(batch_logits)
+        averaged_logits = torch.mean(stacked_logits, dim=0)
+        aggregated_batches.append(averaged_logits)
 
-          # 重み付き集約（torch.stackを使用）
-          stacked_logits = torch.stack(batch_logits)
-          weight_tensor = torch.tensor(batch_weights, device=stacked_logits.device).view(-1, 1, 1)
-          weighted_logits = (stacked_logits * weight_tensor).sum(dim=0)
-        else:
-          weighted_logits = batch_logits[0]
-
-        aggregated_batches.append(weighted_logits)
-
-    print(f"[FedKD] Successfully aggregated {len(aggregated_batches)} batches without quality filtering")
+    print(f"[FedKD-SA] Successfully aggregated {len(aggregated_batches)} batches using simple average (no weights, no filtering)")
     return aggregated_batches
-
-  def _manage_logit_history(self, new_logits: List[Tensor]) -> None:
-    """ロジット履歴の管理"""
-    if new_logits:
-      self.logit_history.append(new_logits.copy())
-
-      # 履歴サイズを制限
-      if len(self.logit_history) > self.max_history_rounds:
-        self.logit_history.pop(0)
-
-  def _get_enhanced_logits(self) -> List[Tensor]:
-    """履歴を考慮した強化ロジット"""
-    if not self.logit_history:
-      return self.avg_logits
-
-    if len(self.logit_history) == 1:
-      return self.avg_logits
-
-    # 過去のロジットとの移動平均を計算
-    current_logits = self.avg_logits
-    if len(self.logit_history) >= 2:
-      prev_logits = self.logit_history[-2]
-
-      if len(current_logits) == len(prev_logits):
-        # 重み付き移動平均
-        alpha = 0.7  # 現在のロジットの重み
-        enhanced_logits = []
-
-        for curr_batch, prev_batch in zip(current_logits, prev_logits):
-          if curr_batch.shape == prev_batch.shape:
-            enhanced_batch = alpha * curr_batch + (1 - alpha) * prev_batch
-            enhanced_logits.append(enhanced_batch)
-          else:
-            enhanced_logits.append(curr_batch)
-
-        print(f"[FedKD] Applied temporal smoothing with {len(enhanced_logits)} batches")
-        return enhanced_logits
-
-    return current_logits
 
   @override
   def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
@@ -222,21 +180,24 @@ class FedKD(Strategy):
     # 現在のラウンド情報を追加
     config["current_round"] = server_round
 
-    # 強化されたロジットを取得（履歴を考慮）
-    enhanced_logits = self._get_enhanced_logits()
+    # 集約されたロジット（通常の集約のみ）
+    aggregated_logits = self.avg_logits
 
     # サーバーからクライアントへの通信コスト測定
     server_to_client_mb = 0.0
 
     # 前回のラウンドで集約されたロジットがある場合のみ追加
-    if enhanced_logits:
-      logits_data = batch_list_to_base64(enhanced_logits)
+    if aggregated_logits:
+      logits_data = batch_list_to_base64(aggregated_logits)
       config["avg_logits"] = logits_data
       # ロジットデータのサイズを測定
       server_to_client_mb = calculate_data_size_mb(logits_data)
-      # 現在の温度をクライアントに送信
+      # 固定温度をクライアントに送信
       config["temperature"] = self.kd_temperature
-      print(f"[FedKD] Sending {len(enhanced_logits)} enhanced logit batches to clients (temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)")
+      config["logit_temperature"] = self.logit_temperature
+      print(
+        f"[FedKD] Sending {len(aggregated_logits)} aggregated logit batches (KD temp: {self.kd_temperature:.3f}, logit temp: {self.logit_temperature:.3f}, size: {server_to_client_mb:.4f} MB)"
+      )
     else:
       print("[FedKD] No logits available for this round")
 
@@ -286,13 +247,10 @@ class FedKD(Strategy):
     if logits_batch_lists and client_weights:
       print(f"[FedKD] Aggregating logits from {len(logits_batch_lists)} clients")
 
-      # 重み付きロジット集約を実行
-      self.avg_logits = self._weighted_logit_aggregation(logits_batch_lists, client_weights)
+      # 現在のラウンドのロジット集約を実行
+      self.avg_logits = self._simple_average_logit_aggregation(logits_batch_lists, client_weights)
 
-      # ロジット履歴を管理
-      self._manage_logit_history(self.avg_logits)
-
-      print(f"[FedKD] Successfully aggregated {len(self.avg_logits)} batches of logits")
+      print(f"[FedKD] Successfully aggregated {len(self.avg_logits)} batches using simple average aggregation")
     else:
       print("[FedKD] No valid logits received from clients")
 
@@ -315,7 +273,8 @@ class FedKD(Strategy):
       aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
 
     # 現在の温度をメトリクスに追加
-    aggregated_metrics["current_temperature"] = self.kd_temperature
+    aggregated_metrics["current_kd_temperature"] = self.kd_temperature
+    aggregated_metrics["current_logit_temperature"] = self.logit_temperature
     if self.avg_logits:
       aggregated_metrics["num_aggregated_batches"] = len(self.avg_logits)
 
@@ -331,8 +290,11 @@ class FedKD(Strategy):
       "comm_cost_client_to_server_logits_mb": total_logits_mb,
       "comm_cost_total_round_mb": total_round_mb,
       "comm_cost_cumulative_mb": sum(self.communication_costs["total_round_mb"]),
-      "current_temperature": self.kd_temperature,
+      "current_kd_temperature": self.kd_temperature,
+      "current_logit_temperature": self.logit_temperature,
     }
+
+    # 品質メトリクスは削除済み（簡素化のため）
 
     if self.avg_logits:
       communication_metrics["num_aggregated_batches"] = len(self.avg_logits)

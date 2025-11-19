@@ -25,18 +25,17 @@ serverapp = "fed.communication.server.server_app:app"
 clientapp = "fed.communication.client.client_app:app"
 
 [tool.flwr.app.config]
-model_name = "simple-cnn"
+model_name = "mini-cnn"
 dataset_name = "uoft-cs/cifar10"
-client_name = "fed-moon-client"
-server_name = "fed-kd-server"
-
+client_name = "fed-avg-client"
+server_name = "fed-avg-server"
 
 num-server-rounds = 10
 local-epochs = 3
 
 server-device = "cpu"
 use-wandb = true
-wandb_project_name = "fl-dev-lr-0.01"
+wandb_project_name = "fl-dev-server-0.02"
 
 [tool.flwr.federations]
 default = "local-simulation"
