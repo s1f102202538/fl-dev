@@ -155,15 +155,20 @@ class FedKDParamsShare(Strategy):
     # Add temperature parameter
     config["temperature"] = self.kd_temperature
 
+    # サーバーからクライアントへの通信コスト測定
+    server_to_client_mb = 0.0
+
     # Add server-generated logits for knowledge distillation
     if self.server_generated_logits:
-      config["avg_logits"] = batch_list_to_base64(self.server_generated_logits)
-
-      # Calculate communication cost
-      logits_mb = calculate_data_size_mb(config["avg_logits"])
+      logits_data = batch_list_to_base64(self.server_generated_logits)
+      config["avg_logits"] = logits_data
+      # ロジットデータのサイズを測定
+      server_to_client_mb = calculate_data_size_mb(logits_data)
       print(
-        f"[FedKD-ParamsShare] Round {server_round}: Sending {len(self.server_generated_logits)} logit batches to clients (temp: {self.kd_temperature:.3f}, size: {logits_mb:.4f} MB)"
+        f"[FedKD-ParamsShare] Round {server_round}: Sending {len(self.server_generated_logits)} logit batches (temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)"
       )
+    else:
+      print(f"[FedKD-ParamsShare] Round {server_round}: No logits available for this round")
 
     fit_ins = FitIns(parameters, config)
 
@@ -171,16 +176,11 @@ class FedKDParamsShare(Strategy):
     sample_size = int(self.fraction_fit * client_manager.num_available())
     clients = client_manager.sample(num_clients=sample_size, min_num_clients=self.min_fit_clients)
 
-    # Calculate server->client communication cost
-    if self.server_generated_logits:
-      logits_mb_per_client = calculate_data_size_mb(config["avg_logits"])
-      total_logits_mb = logits_mb_per_client * len(clients)
-      self.communication_costs["server_to_client_logits_mb"].append(total_logits_mb)
-      print(f"[FedKD-ParamsShare] Round {server_round}: Total server->client communication: {total_logits_mb:.4f} MB ({len(clients)} clients)")
-    else:
-      # No logits sent (e.g., Round 1)
-      self.communication_costs["server_to_client_logits_mb"].append(0.0)
-      print(f"[FedKD-ParamsShare] Round {server_round}: No logits sent to clients")
+    # 実際の通信コストはクライアント数を考慮
+    total_server_to_client_mb = server_to_client_mb * len(clients)
+    self.communication_costs["server_to_client_logits_mb"].append(total_server_to_client_mb)
+
+    print(f"[FedKD-ParamsShare] Round {server_round}: Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
 
     return [(client, fit_ins) for client in clients]
 
@@ -202,7 +202,7 @@ class FedKDParamsShare(Strategy):
     for _, fit_res in results:
       if fit_res.parameters.tensors:
         params_mb = calculate_communication_cost(fit_res.parameters)
-        total_params_mb += params_mb
+        total_params_mb += params_mb["size_mb"]
 
     self.communication_costs["client_to_server_params_mb"].append(total_params_mb)
 

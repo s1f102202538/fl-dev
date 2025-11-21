@@ -1,5 +1,6 @@
 from fed.models.base_model import BaseModel
-from fed.util.model_util import get_weights, ndarrays_to_parameters, weighted_average
+from fed.util.model_util import get_weights, weighted_average
+from flwr.common import ndarrays_to_parameters
 from flwr.server import ServerAppComponents, ServerConfig
 from torch import device
 from torch.utils.data import DataLoader
