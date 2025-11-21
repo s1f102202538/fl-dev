@@ -8,6 +8,7 @@ from flwr.common import Context
 from .apps.fed_avg_client import FedAvgClient
 from .apps.fed_kd_client import FedKdClient
 from .apps.fed_moon_client import FedMoonClient
+from .apps.fed_moon_params_share_client import FedMoonParamsShareClient
 from .apps.old_fed_moon_client import OldFedMoonClient
 
 
@@ -20,7 +21,7 @@ def client_fn(context: Context) -> Client:
   num_partitions = int(context.node_config["num-partitions"])
 
   # MOONパラメータ（オプション）
-  out_dim = int(context.run_config.get("out_dim", 256))
+  out_dim = int(context.run_config.get("out_dim", 128))
   n_classes = int(context.run_config.get("n_classes", 10))
   use_projection_head = bool(context.run_config.get("use_projection_head", True))
 
@@ -41,6 +42,11 @@ def client_fn(context: Context) -> Client:
     public_test_data = load_public_data(data_loader_config)
 
     return FedMoonClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
+  elif client_name == "fed-moon-params-share-client":
+    net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=use_projection_head)
+    public_test_data = load_public_data(data_loader_config)
+
+    return FedMoonParamsShareClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
   elif client_name == "old-fed-moon-client":
     net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=use_projection_head)
     public_test_data = load_public_data(data_loader_config)

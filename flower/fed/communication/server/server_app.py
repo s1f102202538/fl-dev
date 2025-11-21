@@ -10,6 +10,7 @@ from torch import device
 from .apps.fed_avg_server import FedAvgServer
 from .apps.fed_kd_avg_server import FedKDAvgServer
 from .apps.fed_kd_distillation_model_server import FedKDDistillationModelServer
+from .apps.fed_kd_params_share_server import FedKDParamsShareServer
 from .apps.fed_kd_public_distillation_server import FedKDPublicDistillationServer
 from .apps.fed_kd_weighted_avg_server import FedKDWeightedAvgServer
 
@@ -20,7 +21,7 @@ def server_fn(context: Context) -> ServerAppComponents:
   server_name = str(context.run_config["server_name"])
   wandb_project_name = str(context.run_config["wandb_project_name"])
   n_classes = int(context.run_config.get("n_classes", 10))
-  out_dim = int(context.run_config.get("out_dim", 256))
+  out_dim = int(context.run_config.get("out_dim", 128))
   use_wandb = bool(context.run_config["use-wandb"])
 
   os.environ["WANDB_PROJECT_NAME"] = wandb_project_name
@@ -58,6 +59,19 @@ def server_fn(context: Context) -> ServerAppComponents:
     public_data_loader = load_public_data(data_loader_config)
 
     return FedKDPublicDistillationServer.create_server(
+      server_model=server_model,
+      public_data_loader=public_data_loader,
+      server_device=server_device,
+      use_wandb=use_wandb,
+      run_config=context.run_config,
+      num_rounds=num_rounds,
+    )
+  elif server_name == "fed-kd-params-share-server":
+    # Create server-side model and public data loader for parameter aggregation and logit generation
+    server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
+    public_data_loader = load_public_data(data_loader_config)
+
+    return FedKDParamsShareServer.create_server(
       server_model=server_model,
       public_data_loader=public_data_loader,
       server_device=server_device,

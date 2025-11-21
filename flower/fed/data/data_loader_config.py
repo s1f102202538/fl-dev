@@ -67,7 +67,7 @@ class DataLoaderConfig:
   size_unit: str = "absolute"  # "absolute" or "percent"
 
   # Public dataset configuration
-  public_max_samples: int = 5000
+  public_max_samples: int = 8000
 
   # Evaluation dataset configuration (use more data for stable accuracy measurement)
-  eval_test_samples: int = 5000  # Use 5000 samples for more reliable accuracy evaluation
+  eval_test_samples: int = 2000  # Use 5000 samples for more reliable accuracy evaluation

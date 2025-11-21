@@ -33,30 +33,6 @@ class Distillation:
       min_batches = min(expected_batches, actual_batches)
       print(f"Using first {min_batches} batches for distillation")
 
-  def _validate_and_combine_losses(self, distillation_loss: torch.Tensor, student_loss: torch.Tensor, alpha: float, beta: float) -> torch.Tensor:
-    """損失の検証と結合を行う
-
-    Args:
-        distillation_loss: KL蒸留損失
-        student_loss: クロスエントロピー損失
-        alpha: KL蒸留損失の重み (FedKD論文での α)
-        beta: CE損失の重み (FedKD論文での β, alpha + beta = 1.0推奨)
-
-    Returns:
-        結合された損失
-    """
-    # NaN/Inf の確認と処理
-    if torch.isnan(distillation_loss) or torch.isinf(distillation_loss):
-      print("Warning: Invalid distillation loss detected, using only CE loss")
-      loss = student_loss
-    elif torch.isnan(student_loss) or torch.isinf(student_loss):
-      print("Warning: Invalid student loss detected, using only distillation loss")
-      loss = distillation_loss
-    else:
-      loss = alpha * distillation_loss + beta * student_loss
-
-    return loss
-
   def _check_early_stopping(self, current_loss: float, best_loss: float, patience_counter: int, patience: int) -> tuple[bool, float, int]:
     """Early stoppingのチェックを行う
 
@@ -136,13 +112,9 @@ class Distillation:
 
           student_logits = self.studentModel.predict(inputs)
 
-          # ロジットのクリッピング
-          soft_batch_clipped = torch.clamp(soft_batch, min=-20, max=20)
-          student_logits_clipped = torch.clamp(student_logits, min=-20, max=20)
-
           # 温度スケーリングされたソフトマックス
-          teacher_probs = F.softmax(soft_batch_clipped / T, dim=1)  # 教師の確率分布
-          student_log_probs = F.log_softmax(student_logits_clipped / T, dim=1)  # 生徒のlog確率分布
+          teacher_probs = F.softmax(soft_batch / T, dim=1)  # 教師の確率分布
+          student_log_probs = F.log_softmax(student_logits / T, dim=1)  # 生徒のlog確率分布
 
           # 数値安定性のためのクリッピング
           eps = 1e-8
@@ -154,7 +126,8 @@ class Distillation:
           # 生徒モデルの通常のCE損失
           student_loss = ce_loss(student_logits, labels)
 
-          loss = self._validate_and_combine_losses(distillation_loss, student_loss, alpha, beta)
+          loss = alpha * distillation_loss + beta * student_loss
+
           # 損失を逆伝搬
           loss.backward()
 

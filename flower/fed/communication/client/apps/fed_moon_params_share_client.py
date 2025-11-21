@@ -1,4 +1,4 @@
-"""FedMoon with Logit Sharing: Flower / PyTorch app"""
+"""FedMoon with Parameter Sharing: Flower / PyTorch app"""
 
 import copy
 from typing import Dict, Tuple
@@ -10,8 +10,7 @@ from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
 from fed.util.model_util import (
   base64_to_batch_list,
-  batch_list_to_base64,
-  filter_and_calibrate_logits,
+  get_weights,
   load_model_from_state,
   save_model_to_state,
   set_weights,
@@ -22,8 +21,8 @@ from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
 
-class FedMoonClient(NumPyClient):
-  """FedMoon client with logit sharing capabilities."""
+class FedMoonParamsShareClient(NumPyClient):
+  """FedMoon client that shares model parameters instead of logits."""
 
   def __init__(
     self,
@@ -52,8 +51,8 @@ class FedMoonClient(NumPyClient):
 
     # Initialize Moon contrastive learning with optimized parameters
     self.moon_learner = MoonContrastiveLearning(
-      mu=1.0,  # 1.0 の方がよい可能性
-      temperature=0.5,  # Optimized from analysis: best performance at temp=0.5
+      mu=1.0,
+      temperature=0.5,
       device=self.device,
     )
 
@@ -64,7 +63,7 @@ class FedMoonClient(NumPyClient):
     )
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    """FedMoon client training with logit sharing and contrastive learning."""
+    """FedMoon client training with logit-based distillation and parameter sharing."""
     temperature = float(config.get("temperature", 3.0))
 
     # Load previous round model if available
@@ -84,16 +83,14 @@ class FedMoonClient(NumPyClient):
     # Save current model state for next round
     save_model_to_state(self.net, self.client_state, self.local_model_name)
 
-    filtered_logits = self._generate_and_filter_logits()
-
     print(f"Client training loss: {train_loss:.4f}")
 
+    # Return model parameters instead of logits
     return (
-      [],  # Empty list for logit-only sharing (no parameter aggregation)
+      get_weights(self.net),  # Send model parameters to server
       len(self.train_loader.dataset),  # type: ignore
       {
         "train_loss": train_loss,
-        "logits": batch_list_to_base64(filtered_logits),
       },
     )
 
@@ -129,8 +126,8 @@ class FedMoonClient(NumPyClient):
 
     # Train virtual global model with optimized FedKD parameters
     self.virtual_global_model = distillation.train_knowledge_distillation(
-      epochs=5,  # Increased from 3 for better distillation
-      learning_rate=0.001,  # Reduced from 0.01 for more stable training
+      epochs=5,
+      learning_rate=0.001,
       T=temperature,
       alpha=0.3,  # FedKD paper: KL distillation loss weight
       beta=0.7,  # FedKD paper: CE loss weight
@@ -161,10 +158,10 @@ class FedMoonClient(NumPyClient):
       return self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
-        lr=0.01,  # Optimized from analysis: reduced from 0.01 for better convergence
+        lr=0.01,
         epochs=self.local_epochs,
-        args_optimizer="sgd",  # Original paper settings
-        weight_decay=1e-5,  # Original paper settings
+        args_optimizer="sgd",
+        weight_decay=1e-5,
       )
     else:
       print("[INFO] No previous model available, performing normal training")
@@ -175,36 +172,6 @@ class FedMoonClient(NumPyClient):
         lr=0.01,
         device=self.device,
       )
-
-  def _generate_and_filter_logits(self) -> list:
-    """Generate and calibrate logits for sharing with server without quality filtering."""
-
-    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
-
-    # Apply basic calibration without quality filtering
-    filtered_logits = filter_and_calibrate_logits(raw_logits)
-    print(f"[DEBUG] Calibrated logits: {len(filtered_logits)} batches (no filtering)")
-
-    return filtered_logits
-
-  # def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
-  #   """Evaluate model performance with performance tracking."""
-  #   # Load the trained model
-  #   loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
-  #   if loaded_model is not None:
-  #     self.net = loaded_model
-  #     print("[DEBUG] Model loaded successfully for evaluation")
-  #   else:
-  #     print("[Warning] No saved model state found, using initial model")
-
-  #   loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
-
-  #   return (
-  #     loss,
-  #     len(self.val_loader.dataset),  # type: ignore
-  #     {"accuracy": accuracy},
-  #   )
 
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
     """Evaluate model performance using server-provided parameters."""

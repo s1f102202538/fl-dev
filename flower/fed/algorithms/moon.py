@@ -38,13 +38,16 @@ class MoonContrastiveLearning:
         global_model: グローバルモデル
     """
     # 前回のローカルモデルを保存
-    if previous_model is not None:
-      model_copy = copy.deepcopy(previous_model)
-      model_copy.eval()
-      for param in model_copy.parameters():
-        param.requires_grad = False
-      model_copy.to("cpu")  # CPUに移動（メモリ節約）
-      self.previous_model = model_copy
+    if self.previous_model is None:
+      self.previous_model = copy.deepcopy(previous_model)
+    else:
+      self.previous_model.load_state_dict(previous_model.state_dict())
+
+    # ローカルを評価モードに設定し、勾配を無効化
+    self.previous_model.eval()
+    for param in self.previous_model.parameters():
+      param.requires_grad = False
+    self.previous_model.to(self.device)  # デバイスに移動
 
     # グローバルモデルを保存
     if self.global_model is None:
@@ -79,10 +82,8 @@ class MoonContrastiveLearning:
       _, global_features, _ = self.global_model(images)
 
     # 負例用の前回モデルから特徴量を取得
-    self.previous_model.to(self.device)
     with torch.no_grad():
       _, prev_features, _ = self.previous_model(images)
-    self.previous_model.to("cpu")  # CPUに戻す
 
     # L2正規化（対比学習の安定性向上）
     features = torch.nn.functional.normalize(features, p=2, dim=1)
