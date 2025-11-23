@@ -51,7 +51,7 @@ class FedMoonParamsShareClient(NumPyClient):
     # Initialize Moon contrastive learning with optimized parameters
     self.moon_learner = MoonContrastiveLearning(
       mu=3.0,
-      temperature=0.28,
+      temperature=0.3,
       device=self.device,
     )
 

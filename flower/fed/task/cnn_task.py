@@ -32,21 +32,23 @@ class CNNTask:
   @staticmethod
   def test(net: BaseModel, test_loader: DataLoader, device: torch.device) -> tuple[float, float]:
     net.to(device)
+    net.eval()
     criterion = nn.CrossEntropyLoss()
-    correct, loss = 0, 0.0
-    total_samples = 0
+    correct, total_loss, total_samples = 0, 0.0, 0
+
     with torch.no_grad():
       for batch in test_loader:
         images = batch["image"].to(device)
         labels = batch["label"].to(device)
         outputs = net.predict(images)
-        loss += criterion(outputs, labels).item()
-        correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
+        loss = criterion(outputs, labels)
+        total_loss += loss.item() * labels.size(0)
+        correct += (outputs.argmax(dim=1) == labels).sum().item()
         total_samples += labels.size(0)
 
+    avg_loss = total_loss / total_samples
     accuracy = (correct / total_samples) * 100.0
-    loss = loss / len(test_loader)
-    return loss, accuracy
+    return avg_loss, accuracy
 
   @staticmethod
   def inference(net: BaseModel, data_loader: DataLoader, device: torch.device) -> list[torch.Tensor]:
