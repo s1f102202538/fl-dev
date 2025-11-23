@@ -305,8 +305,8 @@ def train_model(model, train_loader, epochs, lr, device, verbose=False):
   """
   print(f"\n🏋️  Training model on {device}")
   print(f"   Epochs: {epochs}")
-  print(f"   Learning rate: {lr}")
-  print(f"   Batches per epoch: {len(train_loader)}")
+  print(f"   LearninBatchesg rate: {lr}")
+  print(f"    per epoch: {len(train_loader)}")
 
   model.to(device)
   final_loss = CNNTask.train(
@@ -400,13 +400,6 @@ def main():
       device=device,
       verbose=args.verbose,
     )
-
-    # モデルの保存（指定されている場合）
-    if args.save_model:
-      save_path = Path(args.save_model)
-      save_path.parent.mkdir(parents=True, exist_ok=True)
-      torch.save(model.state_dict(), save_path)
-      print(f"\n💾 Model saved to: {save_path}")
 
   # テストデータのロード
   test_loader = load_iid_test_data(

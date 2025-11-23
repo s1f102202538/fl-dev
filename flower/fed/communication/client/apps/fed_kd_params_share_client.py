@@ -1,21 +1,11 @@
-"""FedKD with Parameter and Logit Sharing: Flower / PyTorch app"""
+"""FedKD with Parameter Sharing: Flower / PyTorch app - Clients return logits"""
 
-import copy
 from typing import Dict, Tuple
 
 import torch
-from fed.algorithms.distillation import Distillation
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
-from fed.util.model_util import (
-  base64_to_batch_list,
-  batch_list_to_base64,
-  filter_and_calibrate_logits,
-  get_weights,
-  load_model_from_state,
-  save_model_to_state,
-  set_weights,
-)
+from fed.util.model_util import batch_list_to_base64, get_weights, set_weights
 from flwr.client import NumPyClient
 from flwr.common import RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
@@ -23,12 +13,13 @@ from torch.utils.data import DataLoader
 
 
 class FedKdParamsShareClient(NumPyClient):
-  """FedKD client that shares both model parameters and logits.
+  """FedKD client that receives parameters and returns logits.
 
   This client:
-  1. Performs knowledge distillation using server logits
+  1. Receives model parameters from server
   2. Trains the model locally
-  3. Sends both model parameters AND logits back to server
+  3. Generates logits from trained model
+  4. Sends logits back to server
   """
 
   def __init__(
@@ -50,76 +41,34 @@ class FedKdParamsShareClient(NumPyClient):
     self.net.to(self.device)
     self.public_test_data = public_test_data
 
-    # Model state storage keys
-    self.local_model_name = "local-model"
-    self.global_model_name = "global-model"
-
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    """FedKD client training with knowledge distillation, sharing both parameters and logits."""
-    temperature = float(config.get("temperature", 3.0))
+    """FedKD client training: receive parameters, train, return logits."""
 
-    # Perform knowledge distillation if server logits are available
-    if "avg_logits" in config and config["avg_logits"] is not None:
-      self._perform_knowledge_distillation(config["avg_logits"], temperature)
+    # Apply server parameters to local model
+    if parameters is not None and len(parameters) > 0:
+      print("[INFO] Applying server parameters to local model")
+      set_weights(self.net, parameters)
     else:
-      print("[INFO] No server logits available, skipping distillation")
+      print("[INFO] No server parameters provided, using current model state")
 
     # Perform local training
     train_loss = self._perform_local_training()
-
-    # Save trained model
-    save_model_to_state(self.net, self.client_state, self.local_model_name)
-
-    # Generate logits for sharing
-    filtered_logits = self._generate_and_filter_logits()
-
     print(f"Client training loss: {train_loss:.4f}")
 
-    # Return BOTH model parameters AND logits
+    # Generate logits from trained model
+    logits = self._generate_logits()
+    logits_base64 = batch_list_to_base64(logits)
+    print(f"[INFO] Generated {len(logits)} logit batches")
+
+    # Return empty parameters (we're sending logits instead)
     return (
-      get_weights(self.net),  # Send model parameters to server
+      [],
       len(self.train_loader.dataset),  # type: ignore
       {
         "train_loss": train_loss,
-        "logits": batch_list_to_base64(filtered_logits),  # Also send logits
+        "logits": logits_base64,  # Send logits to server
       },
     )
-
-  def _perform_knowledge_distillation(self, avg_logits: str, temperature: float) -> None:
-    """Perform knowledge distillation using server-aggregated logits."""
-
-    # Use saved global model for distillation if available
-    global_model_for_distillation = load_model_from_state(self.client_state, self.net, self.global_model_name)
-    if global_model_for_distillation is not None:
-      distillation_model = global_model_for_distillation
-      print("[DEBUG] Using saved global model for knowledge distillation")
-    else:
-      distillation_model = copy.deepcopy(self.net)
-      print("[DEBUG] No saved global model found, using current model for distillation")
-
-    # Convert base64 logits to tensor batches
-    logits = base64_to_batch_list(avg_logits)
-
-    # Perform knowledge distillation
-    distillation = Distillation(
-      studentModel=distillation_model,
-      public_data=self.public_test_data,
-      soft_targets=logits,
-    )
-
-    # Train model with optimized knowledge distillation parameters
-    self.net = distillation.train_knowledge_distillation(
-      epochs=5,
-      learning_rate=0.001,
-      T=temperature,
-      alpha=0.3,  # KL distillation loss weight
-      beta=0.7,  # CE loss weight
-      device=self.device,
-    )
-
-    # Save distilled model as global model
-    save_model_to_state(self.net, self.client_state, self.global_model_name)
-    print(f"[DEBUG] Knowledge distillation completed (temperature: {temperature:.3f})")
 
   def _perform_local_training(self) -> float:
     """Perform local training on the current model."""
@@ -133,22 +82,15 @@ class FedKdParamsShareClient(NumPyClient):
     print(f"[DEBUG] Local training completed with loss: {train_loss:.4f}")
     return train_loss
 
-  def _generate_and_filter_logits(self) -> list:
-    """Generate and filter logits for sharing with server."""
-
-    # Generate raw logits using trained model
-    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
-
-    # Apply basic calibration without quality filtering
-    filtered_logits = filter_and_calibrate_logits(raw_logits)
-    print(f"[DEBUG] Calibrated logits: {len(filtered_logits)} batches (no filtering)")
-
-    return filtered_logits
+  def _generate_logits(self) -> list:
+    """Generate logits from the trained model."""
+    logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
+    print(f"[DEBUG] Generated logits from {len(logits)} batches")
+    return logits
 
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
     """Evaluate model performance using server-provided parameters."""
-    # parametersがNoneまたは空でない場合、サーバーモデルのパラメータを適用
+    # Apply server parameters for evaluation
     if parameters is not None and len(parameters) > 0:
       print("[DEBUG] Applying server model parameters for evaluation")
       set_weights(self.net, parameters)

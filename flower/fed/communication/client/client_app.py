@@ -22,7 +22,7 @@ def client_fn(context: Context) -> Client:
   num_partitions = int(context.node_config["num-partitions"])
 
   # MOONパラメータ（オプション）
-  out_dim = int(context.run_config.get("out_dim", 128))
+  out_dim = int(context.run_config.get("out_dim", 256))
   n_classes = int(context.run_config.get("n_classes", 10))
   use_projection_head = bool(context.run_config.get("use_projection_head", True))
 

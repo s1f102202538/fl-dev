@@ -4,12 +4,11 @@ import copy
 from typing import Dict, Tuple
 
 import torch
-from fed.algorithms.distillation import Distillation
 from fed.algorithms.moon import MoonContrastiveLearning, MoonTrainer
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
 from fed.util.model_util import (
-  base64_to_batch_list,
+  batch_list_to_base64,
   get_weights,
   load_model_from_state,
   save_model_to_state,
@@ -22,7 +21,7 @@ from torch.utils.data import DataLoader
 
 
 class FedMoonParamsShareClient(NumPyClient):
-  """FedMoon client that shares model parameters instead of logits."""
+  """FedMoon client that receives parameters and returns logits."""
 
   def __init__(
     self,
@@ -51,8 +50,8 @@ class FedMoonParamsShareClient(NumPyClient):
 
     # Initialize Moon contrastive learning with optimized parameters
     self.moon_learner = MoonContrastiveLearning(
-      mu=1.0,
-      temperature=0.5,
+      mu=3.0,
+      temperature=0.28,
       device=self.device,
     )
 
@@ -63,15 +62,17 @@ class FedMoonParamsShareClient(NumPyClient):
     )
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    """FedMoon client training with logit-based distillation and parameter sharing."""
-    temperature = float(config.get("temperature", 3.0))
+    """FedMoon client training: receive parameters, train with MOON, return logits."""
+
+    # Apply server parameters to local model
+    if parameters is not None and len(parameters) > 0:
+      print("[INFO] Applying server parameters to local model")
+      set_weights(self.net, parameters)
+    else:
+      print("[INFO] No server parameters provided, using current model state")
 
     # Load previous round model if available
     previous_round_model = self._load_previous_round_model()
-
-    # Perform knowledge distillation if logits are available
-    if "avg_logits" in config and config["avg_logits"] is not None:
-      self._perform_knowledge_distillation(config["avg_logits"], temperature)
 
     # Update model history for MOON if not first round
     if previous_round_model is not None:
@@ -85,12 +86,18 @@ class FedMoonParamsShareClient(NumPyClient):
 
     print(f"Client training loss: {train_loss:.4f}")
 
-    # Return model parameters instead of logits
+    # Generate logits from trained model
+    logits = self._generate_logits()
+    logits_base64 = batch_list_to_base64(logits)
+    print(f"[INFO] Generated {len(logits)} logit batches")
+
+    # Return empty parameters (we're sending logits instead)
     return (
-      get_weights(self.net),  # Send model parameters to server
+      [],  # Return empty list instead of None
       len(self.train_loader.dataset),  # type: ignore
       {
         "train_loss": train_loss,
+        "logits": logits_base64,  # Send logits to server
       },
     )
 
@@ -103,52 +110,20 @@ class FedMoonParamsShareClient(NumPyClient):
       print("[DEBUG] No previous model found, using initial model")
     return previous_round_model
 
-  def _perform_knowledge_distillation(self, avg_logits: str, temperature: float) -> None:
-    """Perform knowledge distillation to create virtual global model."""
-
-    # Use saved global model for distillation if available
-    global_model_for_distillation = load_model_from_state(self.client_state, self.net, self.global_model_name)
-    if global_model_for_distillation is not None:
-      distillation_base_model = global_model_for_distillation
-      print("[DEBUG] Using saved global model for knowledge distillation")
-    else:
-      distillation_base_model = copy.deepcopy(self.net)
-      print("[DEBUG] No saved global model found, using current model for distillation")
-
-    logits = base64_to_batch_list(avg_logits)
-
-    # Create virtual global model through distillation
-    distillation = Distillation(
-      studentModel=distillation_base_model,
-      public_data=self.public_test_data,
-      soft_targets=logits,
-    )
-
-    # Train virtual global model with optimized FedKD parameters
-    self.virtual_global_model = distillation.train_knowledge_distillation(
-      epochs=5,
-      learning_rate=0.001,
-      T=temperature,
-      alpha=0.3,  # FedKD paper: KL distillation loss weight
-      beta=0.7,  # FedKD paper: CE loss weight
-      device=self.device,
-    )
-
-    # Use virtual global model as starting point for MOON learning
-    self.net = self.virtual_global_model
-
-    # Save distilled model as global model
-    save_model_to_state(self.virtual_global_model, self.client_state, self.global_model_name)
-    print("[DEBUG] Distilled model saved as global model")
+  def _generate_logits(self) -> list:
+    """Generate logits from the trained model."""
+    logits = CNNTask.inference_with_label_correction(self.net, self.public_test_data, device=self.device)
+    print(f"[DEBUG] Generated logits from {len(logits)} batches")
+    return logits
 
   def _update_model_history(self, previous_round_model: BaseModel) -> None:
     """Update model history for MOON contrastive learning."""
-    if self.virtual_global_model is None:
-      self.virtual_global_model = self.net
+    # Use current model as global model for MOON
+    global_model = copy.deepcopy(self.net)
 
     # MOON対比学習の設定
-    self.moon_learner.update_models(previous_round_model, self.virtual_global_model)
-    print("Updated Moon learner with 1 previous model and virtual global model")
+    self.moon_learner.update_models(previous_round_model, global_model)
+    print("Updated Moon learner with 1 previous model and current global model")
 
   def _perform_training(self) -> float:
     """Perform training using normal or MOON approach based on available model history."""

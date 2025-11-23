@@ -32,19 +32,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 
-class FedKDParamsShare(Strategy):
-  """Federated Learning strategy with logit aggregation and parameter distribution.
-
-  This strategy combines:
-  1. Server-side: Send model parameters to clients
-  2. Client-side: Train locally and generate logits from trained model
-  3. Client-side: Send logits back to server
-  4. Server-side: Aggregate logits and perform knowledge distillation on server model
-
-  Flow:
-  - Round 1+: Server sends parameters → Clients train → Clients return logits → Server aggregates logits and distills
-  """
-
+class FedMoonParamsShare(Strategy):
   def __init__(
     self,
     *,
@@ -109,7 +97,7 @@ class FedKDParamsShare(Strategy):
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
     wandb_project_name = os.getenv("WANDB_PROJECT_NAME", "federated-learning-default")
-    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedKDParamsShare")
+    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedMoonParamsShare")
     print(f"[W&B] Initialized project: {wandb_project_name}")
 
   def _aggregate_logits(self, client_logits_list: List[List[Tensor]], weights: List[int]) -> List[Tensor]:
@@ -149,7 +137,7 @@ class FedKDParamsShare(Strategy):
       beta=0.7,
       device=self.device,
     )
-    print(f"[FedKD-ParamsShare] Round {server_round}: Server model distillation completed")
+    print(f"[FedMoon-ParamsShare] Round {server_round}: Server model distillation completed")
 
   def store_results_and_log(self, server_round: int, tag: str, results_dict: Dict) -> None:
     """A helper method that stores results and logs them to W&B if enabled."""
@@ -169,7 +157,7 @@ class FedKDParamsShare(Strategy):
   @override
   def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
     """Initialize global model parameters to send to clients."""
-    print("[FedKD-ParamsShare] Initializing server model parameters")
+    print("[FedMoon-ParamsShare] Initializing server model parameters")
 
     # Return initial model parameters
     initial_parameters = self.initial_parameters
@@ -181,7 +169,7 @@ class FedKDParamsShare(Strategy):
         first_layer_mean = float(initial_ndarrays[0].mean())
         first_layer_std = float(initial_ndarrays[0].std())
         first_layer_sum = float(initial_ndarrays[0].sum())
-        print(f"[FedKD-ParamsShare] INITIAL parameters - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}")
+        print(f"[FedMoon-ParamsShare] INITIAL parameters - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}")
 
     self.initial_parameters = None
     return initial_parameters
@@ -199,7 +187,7 @@ class FedKDParamsShare(Strategy):
     ndarrays = [val.cpu().numpy() for _, val in self.server_model.state_dict().items()]
     parameters = ndarrays_to_parameters(ndarrays)
 
-    print(f"[FedKD-ParamsShare] Round {server_round}: Sending model parameters to clients")
+    print(f"[FedMoon-ParamsShare] Round {server_round}: Sending model parameters to clients")
 
     fit_ins = FitIns(parameters, config)
 
@@ -234,7 +222,7 @@ class FedKDParamsShare(Strategy):
         client_weights.append(fit_res.num_examples)
 
     if not client_logits_list:
-      print(f"[FedKD-ParamsShare] Round {server_round}: No logits received from clients")
+      print(f"[FedMoon-ParamsShare] Round {server_round}: No logits received from clients")
       return None, {}
 
     # Calculate communication costs
@@ -249,12 +237,12 @@ class FedKDParamsShare(Strategy):
     self.communication_costs["total_round_mb"].append(total_size_mb)
 
     print(
-      f"[FedKD-ParamsShare] Round {server_round}: Server->Client params: {params_size_mb:.4f} MB, Client->Server logits: {logits_size_mb:.4f} MB, total: {total_size_mb:.4f} MB"
+      f"[FedMoon-ParamsShare] Round {server_round}: Server->Client params: {params_size_mb:.4f} MB, Client->Server logits: {logits_size_mb:.4f} MB, total: {total_size_mb:.4f} MB"
     )
 
     # Aggregate logits using weighted average
     self.aggregated_logits = self._aggregate_logits(client_logits_list, client_weights)
-    print(f"[FedKD-ParamsShare] Round {server_round}: Aggregated {len(self.aggregated_logits)} logit batches from {len(client_logits_list)} clients")
+    print(f"[FedMoon-ParamsShare] Round {server_round}: Aggregated {len(self.aggregated_logits)} logit batches from {len(client_logits_list)} clients")
 
     # Perform knowledge distillation on server model using aggregated logits
     self._distill_server_model(server_round)
@@ -267,7 +255,7 @@ class FedKDParamsShare(Strategy):
     first_layer_std = float(updated_ndarrays[0].std())
     first_layer_sum = float(updated_ndarrays[0].sum())
     print(
-      f"[FedKD-ParamsShare] Round {server_round}: Server model after distillation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
+      f"[FedMoon-ParamsShare] Round {server_round}: Server model after distillation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
     )
 
     # Aggregate custom metrics if aggregation function is provided
@@ -304,7 +292,7 @@ class FedKDParamsShare(Strategy):
     first_layer_std = float(ndarrays[0].std())
     first_layer_sum = float(ndarrays[0].sum())
     print(
-      f"[FedKD-ParamsShare] Round {server_round}: Sending server model parameters for evaluation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
+      f"[FedMoon-ParamsShare] Round {server_round}: Sending server model parameters for evaluation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
     )
 
     evaluate_ins = EvaluateIns(parameters, config)
@@ -339,7 +327,7 @@ class FedKDParamsShare(Strategy):
     # Log accuracy information
     if "accuracy" in metrics_aggregated:
       accuracy = metrics_aggregated["accuracy"]
-      print(f"[FedKD-ParamsShare] Round {server_round}: Federated evaluation accuracy: {accuracy:.4f}")
+      print(f"[FedMoon-ParamsShare] Round {server_round}: Federated evaluation accuracy: {accuracy:.4f}")
 
     # Store and log results
     self.store_results_and_log(server_round, "federated_evaluate", {"federated_evaluate_loss": loss_aggregated, **metrics_aggregated})

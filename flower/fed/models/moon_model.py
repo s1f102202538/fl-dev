@@ -12,7 +12,7 @@ from .simple_cnn import SimpleCNN, SimpleCNN_header, SimpleCNNMNIST, SimpleCNNMN
 class ModelFedCon(BaseModel):
   """統一されたベースのMOONモデル（projection headあり）"""
 
-  def __init__(self, base_model: str, out_dim: int = 128, n_classes: int = 10):
+  def __init__(self, base_model: str, out_dim: int = 256, n_classes: int = 10):
     super().__init__()
 
     if base_model == "mini-cnn":
@@ -31,11 +31,11 @@ class ModelFedCon(BaseModel):
       raise ValueError(f"Unsupported base_model: {base_model}")
 
     # projection MLP
-    self.l1 = nn.Linear(num_ftrs, num_ftrs)
-    self.l2 = nn.Linear(num_ftrs, out_dim)
+    self.l1 = nn.Linear(num_ftrs, out_dim)
+    self.l2 = nn.Linear(out_dim, out_dim)
 
     # last layer
-    self.l3 = nn.Linear(out_dim, n_classes)
+    self.l3 = nn.Linear(num_ftrs, n_classes)
 
   def forward(self, x: Tensor) -> tuple[Tensor, Tensor, Tensor]:
     h = self.features(x)

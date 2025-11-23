@@ -50,6 +50,13 @@ class CNNTask:
 
   @staticmethod
   def inference(net: BaseModel, data_loader: DataLoader, device: torch.device) -> list[torch.Tensor]:
+    """Generate logits without any correction.
+
+    Args:
+        net: Model to generate logits from
+        data_loader: DataLoader containing data
+        device: Device to run inference on
+    """
     net.to(device)
     net.eval()
     logits = []
@@ -57,6 +64,44 @@ class CNNTask:
       for batch in data_loader:
         images = batch["image"].to(device)
         outputs = net.predict(images)
+        logits.append(outputs.cpu())
+
+    return logits
+
+  @staticmethod
+  def inference_with_label_correction(net: BaseModel, data_loader: DataLoader, device: torch.device, correction_strength: float = 1.0) -> list[torch.Tensor]:
+    """Generate logits with label-based correction using top1-top2 margin.
+
+    Args:
+        net: Model to generate logits from
+        data_loader: DataLoader containing labeled IID public data
+        device: Device to run inference on
+        correction_strength: Strength multiplier for correction (default: 1.0)
+
+    Returns:
+        List of corrected logit tensors
+    """
+    net.to(device)
+    net.eval()
+    logits = []
+    with torch.no_grad():
+      for batch in data_loader:
+        images = batch["image"].to(device)
+        labels = batch["label"].to(device)
+        outputs = net.predict(images)
+
+        # Calculate top1-top2 margin correction
+        # top1 = maximum logit, top2 = second maximum logit (excluding correct class)
+        top2 = outputs.clone()
+        top2.scatter_(1, labels.unsqueeze(1), float("-inf"))  # Exclude correct class
+        top2_vals, _ = top2.max(dim=1)
+
+        # Margin = top1 - top2
+        margin = outputs.max(dim=1).values - top2_vals
+
+        # Add correction to correct class based on margin
+        outputs[torch.arange(len(labels)), labels] += correction_strength * margin
+
         logits.append(outputs.cpu())
 
     return logits
