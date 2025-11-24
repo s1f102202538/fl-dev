@@ -35,7 +35,7 @@ local-epochs = 5
 
 server-device = "cpu"
 use-wandb = true
-wandb_project_name = "fl-dev-server-0.02"
+wandb_project_name = "fl-dev-server-train-data-25000"
 
 [tool.flwr.federations]
 default = "local-simulation"

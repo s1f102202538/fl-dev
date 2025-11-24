@@ -66,6 +66,9 @@ class DataLoaderConfig:
   plot_type: str = "bar"  # "bar" or "heatmap"
   size_unit: str = "absolute"  # "absolute" or "percent"
 
+  # Training dataset configuration
+  train_max_samples: int = 25000
+
   # Public dataset configuration
   public_max_samples: int = 8000
 

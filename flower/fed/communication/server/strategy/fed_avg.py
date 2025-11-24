@@ -16,13 +16,6 @@ from flwr.server.strategy import FedAvg
 
 
 class CustomFedAvg(FedAvg):
-  """A class that behaves like FedAvg but has extra functionality.
-
-  This strategy: (1) saves results to the filesystem, (2) saves a
-  checkpoint of the global  model when a new best is found, (3) logs
-  results to W&B if enabled.
-  """
-
   def __init__(self, net: BaseModel, run_config: UserConfig, use_wandb: bool, *args: object, **kwargs: object) -> None:
     super().__init__(*args, **kwargs)  # type: ignore
 

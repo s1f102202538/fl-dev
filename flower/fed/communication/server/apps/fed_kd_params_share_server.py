@@ -52,7 +52,7 @@ class FedKDParamsShareServer:
       fraction_evaluate=1.0,
       initial_parameters=initial_parameters,
       evaluate_metrics_aggregation_fn=weighted_average,
-      kd_temperature=5.0,  # Knowledge distillation temperature
+      kd_temperature=3.0,  # Knowledge distillation temperature
       min_fit_clients=5,
       min_evaluate_clients=5,
       min_available_clients=5,

@@ -42,7 +42,7 @@ class FedKDDistillationModelServer:
       fraction_fit=1.0,
       fraction_evaluate=1.0,
       evaluate_metrics_aggregation_fn=weighted_average,
-      server_training_epochs=5,  # Server model training epochs
+      server_training_epochs=20,  # Server model training epochs
       server_learning_rate=0.001,  # Server model learning rate
       kd_temperature=3.0,  # Knowledge distillation temperature
       min_fit_clients=5,

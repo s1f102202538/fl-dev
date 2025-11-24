@@ -213,8 +213,8 @@ class FedKDDistillationModel(Strategy):
       epochs=self.server_training_epochs,
       learning_rate=self.server_learning_rate,
       T=self.kd_temperature,
-      alpha=0.3,  # KL distillation loss weight
-      beta=0.7,  # CE loss weight
+      alpha=0.7,  # KL distillation loss weight
+      beta=0.3,  # CE loss weight
       device=self.device,
     )
 
