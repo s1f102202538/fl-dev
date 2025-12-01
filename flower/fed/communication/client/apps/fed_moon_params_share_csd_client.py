@@ -4,12 +4,11 @@ import copy
 from typing import Dict, Tuple
 
 import torch
-from fed.algorithms.moon import MoonContrastiveLearning, MoonTrainer
+from fed.algorithms.csd_based_moon import CsdBasedMoonContrastiveLearning, CsdBasedMoonTrainer
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
 from fed.util.model_util import (
   batch_list_to_base64,
-  get_weights,
   load_model_from_state,
   save_model_to_state,
   set_weights,
@@ -48,21 +47,34 @@ class FedMoonParamsShareCsdClient(NumPyClient):
     self.local_model_name = "local-model"
     self.global_model_name = "global-model"
 
-    # Initialize Moon contrastive learning with optimized parameters
-    self.moon_learner = MoonContrastiveLearning(
+    # Initialize CSD-based Moon contrastive learning with optimized parameters
+    self.moon_learner = CsdBasedMoonContrastiveLearning(
       mu=3.0,
       temperature=0.3,
+      lambda_csd=0.5,  # CSD損失の重み
+      csd_temperature=0.3,  # CSD用の温度
+      csd_margin=0.1,
       device=self.device,
     )
 
-    # Initialize Moon trainer
-    self.moon_trainer = MoonTrainer(
+    # Initialize CSD-based Moon trainer
+    self.moon_trainer = CsdBasedMoonTrainer(
       moon_learner=self.moon_learner,
       device=self.device,
     )
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
     """FedMoon client training: receive parameters, train with MOON, return logits."""
+
+    # Extract class prototypes from config if available
+    class_prototypes = None
+    if "class_prototypes" in config:
+      print("[INFO] Received class prototypes from server")
+      from fed.util.model_util import base64_to_batch_list
+
+      prototypes_list = base64_to_batch_list(str(config["class_prototypes"]))
+      class_prototypes = prototypes_list[0].to(self.device)  # [n_classes, logit_dim]
+      print(f"[INFO] Class prototypes shape: {class_prototypes.shape}")
 
     # Apply server parameters to local model
     if parameters is not None and len(parameters) > 0:
@@ -79,7 +91,7 @@ class FedMoonParamsShareCsdClient(NumPyClient):
       self._update_model_history(previous_round_model)
 
     # Perform training (normal or MOON based on available history)
-    train_loss = self._perform_training()
+    train_loss = self._perform_training(class_prototypes)
 
     # Save current model state for next round
     save_model_to_state(self.net, self.client_state, self.local_model_name)
@@ -112,7 +124,7 @@ class FedMoonParamsShareCsdClient(NumPyClient):
 
   def _generate_logits(self) -> list:
     """Generate logits from the trained model."""
-    logits = CNNTask.inference_with_label_correction(self.net, self.public_test_data, device=self.device)
+    logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
     print(f"[DEBUG] Generated logits from {len(logits)} batches")
     return logits
 
@@ -125,11 +137,11 @@ class FedMoonParamsShareCsdClient(NumPyClient):
     self.moon_learner.update_models(previous_round_model, global_model)
     print("Updated Moon learner with 1 previous model and current global model")
 
-  def _perform_training(self) -> float:
+  def _perform_training(self, class_prototypes=None) -> float:
     """Perform training using normal or MOON approach based on available model history."""
     # MOON学習が可能かチェック
     if self.moon_learner.previous_model is not None and self.moon_learner.global_model is not None:
-      print("[INFO] Performing MOON training with previous model")
+      print("[INFO] Performing CSD-based MOON training with previous model")
       return self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
@@ -137,6 +149,7 @@ class FedMoonParamsShareCsdClient(NumPyClient):
         epochs=self.local_epochs,
         args_optimizer="sgd",
         weight_decay=1e-5,
+        class_prototypes=class_prototypes,  # CSD用のプロトタイプを渡す
       )
     else:
       print("[INFO] No previous model available, performing normal training")

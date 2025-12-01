@@ -107,3 +107,46 @@ class CNNTask:
         logits.append(outputs.cpu())
 
     return logits
+
+  @staticmethod
+  def inference_with_loca(net: BaseModel, data_loader: DataLoader, device: torch.device, alpha: float = 1.5) -> list[torch.Tensor]:
+    """
+    Generate logits with LoCa calibration.
+
+    ```
+    Args:
+        net: Model to generate logits from
+        data_loader: DataLoader containing labeled data
+        device: Device to run inference on
+        alpha: Scaling factor for target logit (LoCa)
+
+    Returns:
+        List of calibrated logit tensors
+    """
+    net.to(device)
+    net.eval()
+    logits = []
+
+    with torch.no_grad():
+      for batch in data_loader:
+        images = batch["image"].to(device)
+        labels = batch["label"].to(device)
+
+        # 1. 通常の推論
+        outputs = net.predict(images)
+
+        # 2. LoCa 校正
+        # target logit を alpha 倍し、非 target の logits を再調整
+        target_logits = outputs[torch.arange(len(labels)), labels]
+        target_logits_calibrated = target_logits * alpha
+        outputs_calibrated = outputs.clone()
+        outputs_calibrated[torch.arange(len(labels)), labels] = target_logits_calibrated
+
+        # optional: 非 target logits の再スケーリング
+        non_target_mask = torch.ones_like(outputs, dtype=torch.bool)
+        non_target_mask[torch.arange(len(labels)), labels] = False
+        outputs_calibrated[non_target_mask] = outputs_calibrated[non_target_mask] / alpha**0.5
+
+        logits.append(outputs_calibrated.cpu())
+
+    return logits

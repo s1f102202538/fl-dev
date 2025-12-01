@@ -8,6 +8,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, override
 import torch
 import wandb
 from fed.algorithms.distillation import Distillation
+from fed.algorithms.loca_based_distillation import LoCaBasedDistillation
 from fed.models.base_model import BaseModel
 from fed.util.communication_cost import calculate_communication_cost, calculate_data_size_mb
 from fed.util.model_util import base64_to_batch_list, create_run_dir
@@ -135,7 +136,7 @@ class FedKDParamsShare(Strategy):
   def _distill_server_model(self, server_round: int) -> None:
     """Perform knowledge distillation on server model using aggregated client logits."""
 
-    distillation = Distillation(
+    distillation = LoCaBasedDistillation(
       studentModel=self.server_model,
       public_data=self.public_data_loader,
       soft_targets=self.aggregated_logits,

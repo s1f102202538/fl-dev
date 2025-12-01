@@ -10,6 +10,7 @@ from torch import device
 from .apps.fed_avg_server import FedAvgServer
 from .apps.fed_kd_avg_server import FedKDAvgServer
 from .apps.fed_kd_distillation_model_server import FedKDDistillationModelServer
+from .apps.fed_kd_params_share_csd_server import FedKdParamsShareCsdServer
 from .apps.fed_kd_params_share_server import FedKDParamsShareServer
 from .apps.fed_kd_public_distillation_server import FedKDPublicDistillationServer
 from .apps.fed_kd_weighted_avg_server import FedKDWeightedAvgServer
@@ -86,6 +87,18 @@ def server_fn(context: Context) -> ServerAppComponents:
     public_data_loader = load_public_data(data_loader_config)
 
     return FedMoonParamsShareServer.create_server(
+      server_model=server_model,
+      public_data_loader=public_data_loader,
+      server_device=server_device,
+      use_wandb=use_wandb,
+      run_config=context.run_config,
+      num_rounds=num_rounds,
+    )
+  elif server_name == "fed-kd-params-share-csd-server":
+    server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
+    public_data_loader = load_public_data(data_loader_config)
+
+    return FedKdParamsShareCsdServer.create_server(
       server_model=server_model,
       public_data_loader=public_data_loader,
       server_device=server_device,

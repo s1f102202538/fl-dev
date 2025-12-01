@@ -4,6 +4,7 @@ import copy
 from typing import Dict, Tuple
 
 import torch
+from fed.algorithms.logit_calibration_moon import LogitCalibrationMoonContrastiveLearning, LogitCalibrationMoonTrainer
 from fed.algorithms.moon import MoonContrastiveLearning, MoonTrainer
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask

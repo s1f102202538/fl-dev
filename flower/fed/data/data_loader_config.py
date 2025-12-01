@@ -67,7 +67,7 @@ class DataLoaderConfig:
   size_unit: str = "absolute"  # "absolute" or "percent"
 
   # Training dataset configuration
-  train_max_samples: int = 25000
+  train_max_samples: int = 50000
 
   # Public dataset configuration
   public_max_samples: int = 8000
