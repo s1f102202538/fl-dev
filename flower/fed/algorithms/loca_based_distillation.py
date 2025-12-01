@@ -54,18 +54,18 @@ class LoCaBasedDistillation:
     return False, best_loss, patience_counter
 
   @staticmethod
-  def _loca_calibrate_teacher_logits(teacher_logits: torch.Tensor, labels: torch.Tensor, alpha: float = 0.9) -> torch.Tensor:
-    """
-    LoCa ロジット校正（Teacher ロジットに適用）
+  def _loca_calibrate_teacher_logits(
+    teacher_logits: torch.Tensor,
+    labels: torch.Tensor,
+    alpha: float = 0.9,
+  ) -> torch.Tensor:
+    """LoCa ロジット校正（Teacher ロジットに適用）
 
     論文ベースの実装:
-    1. ロジットから通常の確率分布を計算
-    2. LoCa で非正解クラスを縮小、正解クラスを調整
+      1. ロジットから通常の確率分布を計算
+      2. LoCa で非正解クラスを縮小、正解クラスを調整
 
     温度スケーリングは呼び出し側で適用することを想定。
-
-    クライアントから送信されたロジットは補正なし（生のロジット）を想定。
-    サーバ側でこのメソッドを使い、公開データのラベルに基づいて確率分布を補正。
 
     Args:
         teacher_logits: shape (B, C) の未正規化ロジット（クライアントから集約済み）
@@ -81,38 +81,30 @@ class LoCaBasedDistillation:
     B, C = teacher_logits.shape
     device = teacher_logits.device
 
-    # 1. logits から通常の確率分布を計算（温度適用前）
+    # ステップ 1: ロジットから確率分布を計算
     probs = F.softmax(teacher_logits, dim=1)
 
-    # 2. 各サンプルについて非正解クラスの最大確率を求める
-    mask = torch.ones_like(probs, dtype=torch.bool)
-    mask[torch.arange(B, device=device), labels] = False
-    p_biggest = probs.masked_fill(~mask, -1).max(dim=1).values  # (B,)
-
-    # 3. 正解クラスの確率
-    p_gt = probs[torch.arange(B, device=device), labels]  # (B,)
-
-    # 4. LoCa のしきい値 s を式 (18) に基づき決定
-    # s_max = 1.0 / (1 - p_gt + p_biggest)
-    # s = alpha * s_max
-    s_max = 1.0 / (1 - p_gt + p_biggest + 1e-8)  # 数値安定性のため小さい値を追加
-    s = alpha * s_max  # (B,)
-    s = s.unsqueeze(1)  # (B, 1)
-
-    # 5. 非正解クラスの確率のみを s 倍に縮小
-    probs_loca = probs.clone()
-
-    # 非正解クラスのマスク（正解クラスは False）
+    # ステップ 2: 非正解クラスの最大確率を求める
     non_gt_mask = torch.ones_like(probs, dtype=torch.bool)
     non_gt_mask[torch.arange(B, device=device), labels] = False
+    p_biggest = probs.masked_fill(~non_gt_mask, -1).max(dim=1).values  # shape: (B,)
 
-    # 非正解クラスのみを s 倍
+    # ステップ 3: 正解クラスの確率を取得
+    p_gt = probs[torch.arange(B, device=device), labels]  # shape: (B,)
+
+    # ステップ 4: LoCa のしきい値 s を計算（式 18）
+    # s_max = 1.0 / (1 - p_gt + p_biggest)
+    # s = alpha * s_max
+    s_max = 1.0 / (1 - p_gt + p_biggest + 1e-8)  # 数値安定性
+    s = (alpha * s_max).unsqueeze(1)  # shape: (B, 1)
+
+    # ステップ 5: 非正解クラスの確率のみを s 倍に縮小
+    probs_loca = probs.clone()
     probs_loca[non_gt_mask] *= s.squeeze(1).repeat_interleave(C - 1)
 
-    # 6. 正解クラスの確率を「残りの確率」として再計算
-    # sum_non_gt は非正解クラスの確率の合計
+    # ステップ 6: 正解クラスの確率を残りの確率として再計算
     sum_non_gt = probs_loca[non_gt_mask].view(B, C - 1).sum(dim=1)
-    probs_loca[torch.arange(B, device=device), labels] = 1 - sum_non_gt
+    probs_loca[torch.arange(B, device=device), labels] = 1.0 - sum_non_gt
 
     return probs_loca
 
