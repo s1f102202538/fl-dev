@@ -4,13 +4,11 @@ import copy
 from typing import Dict, Tuple
 
 import torch
-from fed.algorithms.logit_calibration_moon import LogitCalibrationMoonContrastiveLearning, LogitCalibrationMoonTrainer
 from fed.algorithms.moon import MoonContrastiveLearning, MoonTrainer
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
 from fed.util.model_util import (
   batch_list_to_base64,
-  get_weights,
   load_model_from_state,
   save_model_to_state,
   set_weights,

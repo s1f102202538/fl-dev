@@ -136,7 +136,7 @@ class FedKDParamsShare(Strategy):
   def _distill_server_model(self, server_round: int) -> None:
     """Perform knowledge distillation on server model using aggregated client logits."""
 
-    distillation = LoCaBasedDistillation(
+    distillation = Distillation(
       studentModel=self.server_model,
       public_data=self.public_data_loader,
       soft_targets=self.aggregated_logits,
