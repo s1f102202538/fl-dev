@@ -142,11 +142,11 @@ class FedKDParamsShare(Strategy):
     )
 
     self.server_model = distillation.train_knowledge_distillation(
-      epochs=5,
+      epochs=20,
       learning_rate=0.001,
       T=self.kd_temperature,
-      alpha=0.3,
-      beta=0.7,
+      alpha=0.7,
+      beta=0.3,
       device=self.device,
     )
     print(f"[FedKD-ParamsShare] Round {server_round}: Server model distillation completed")
