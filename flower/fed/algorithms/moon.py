@@ -143,7 +143,6 @@ class MoonTrainer:
     lr: float,
     epochs: int,
     args_optimizer: str = "sgd",
-    weight_decay: float = 1e-5,
   ) -> float:
     """FedMoon対比学習による訓練
 
@@ -163,11 +162,11 @@ class MoonTrainer:
 
     # 元論文準拠：オプティマイザーの設定
     if args_optimizer == "adam":
-      optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
+      optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
     else:  # SGD (default)
-      optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9, weight_decay=weight_decay)
+      optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9)
 
-    print(f"[MOON] Using optimizer={args_optimizer}, LR={lr:.6f}, weight_decay={weight_decay}")
+    print(f"[MOON] Using optimizer={args_optimizer}, LR={lr:.6f}")
 
     model.train()
     running_loss = 0.0

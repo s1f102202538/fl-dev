@@ -151,16 +151,19 @@ class Distillation:
           teacher_logits = soft_batch.detach()
           teacher_probs = F.softmax(teacher_logits / T, dim=1)
 
-        # --- make sure teacher_probs is detached and stable ---
-        teacher_probs = teacher_probs.detach()
-        # numerical clamp optional (avoid exact 0)
-        teacher_probs = torch.clamp(teacher_probs, min=1e-8, max=1.0 - 1e-8)
+          # --- make sure teacher_probs is detached and stable ---
+          # numerical clamp optional (avoid exact 0)
+          teacher_probs = torch.clamp(teacher_probs, min=1e-8, max=1.0 - 1e-8)
+
+          # teacher の log 確率も計算（KL divergence用）
+          teacher_log_probs = torch.log(teacher_probs)
 
         # --- student log probs with temperature ---
         student_log_probs = F.log_softmax(student_logits / T, dim=1)
 
-        # --- distillation (KL) loss: F.kl_div(student_log_probs, teacher_probs) computes KL(teacher || student) ---
-        distillation_loss = F.kl_div(student_log_probs, teacher_probs, reduction="batchmean") * (T * T)
+        # --- distillation (KL) loss: KL(teacher || student) ---
+        # log_target=True により KL(P_teacher || P_student) を計算
+        distillation_loss = F.kl_div(student_log_probs, teacher_log_probs, reduction="batchmean", log_target=True) * (T * T)
 
         # --- normal CE loss on raw logits ---
         student_ce_loss = ce_loss(student_logits, labels)

@@ -109,19 +109,30 @@ class CNNTask:
     return logits
 
   @staticmethod
-  def inference_with_loca(net: BaseModel, data_loader: DataLoader, device: torch.device, alpha: float = 1.5) -> list[torch.Tensor]:
+  def inference_with_loca(net: BaseModel, data_loader: DataLoader, device: torch.device, tau: float = 0.92) -> list[torch.Tensor]:
     """
-    Generate logits with LoCa calibration.
+    Generate logits with LoCa (Logit Calibration) correction.
 
-    ```
+    論文準拠の実装（ロジット空間で補正）:
+      1. ロジットから確率分布を計算して縮小係数 s を求める
+      2. 非正解クラスのロジットを s でスケーリング（ロジット空間）
+      3. 補正後のロジットを返す
+
+    LoCa 論文の定義:
+      s_max = 1 / (1 - p_y + p_biggest)
+      s = τ * s_max
+      ここで τ は "shrink factor" (0 < τ ≤ 1)
+      τ が小さいほど非正解クラスを強く抑制
+
     Args:
         net: Model to generate logits from
         data_loader: DataLoader containing labeled data
         device: Device to run inference on
-        alpha: Scaling factor for target logit (LoCa)
+        tau: LoCa の縮小係数 τ（0 < τ ≤ 1）
+             τ=1.0 で最小限の補正、τ→0 で強い抑制
 
     Returns:
-        List of calibrated logit tensors
+        List of LoCa-calibrated logit tensors
     """
     net.to(device)
     net.eval()
@@ -134,18 +145,75 @@ class CNNTask:
 
         # 1. 通常の推論
         outputs = net.predict(images)
+        B, C = outputs.shape
 
-        # 2. LoCa 校正
-        # target logit を alpha 倍し、非 target の logits を再調整
-        target_logits = outputs[torch.arange(len(labels)), labels]
-        target_logits_calibrated = target_logits * alpha
+        # 2. ロジットから確率分布を計算（s の計算のため）
+        probs = torch.nn.functional.softmax(outputs, dim=1)
+
+        # 3. 非正解クラスの最大確率を求める
+        non_gt_mask = torch.ones(B, C, dtype=torch.bool, device=device)
+        non_gt_mask[torch.arange(B, device=device), labels] = False
+        p_biggest = probs.masked_fill(~non_gt_mask, -1).max(dim=1).values  # shape: (B,)
+
+        # 4. 正解クラスの確率を取得
+        p_gt = probs[torch.arange(B, device=device), labels]  # shape: (B,)
+
+        # 5. LoCa のスケーリング係数 s を計算
+        # s_max = 1.0 / (1 - p_y + p_biggest)
+        # s = τ * s_max
+        # 注意: s を 1.0 以下にクリップ（s > 1.0 だと非正解クラスを増幅してしまう）
+        s_max = 1.0 / (1 - p_gt + p_biggest + 1e-8)  # 数値安定性
+        s = torch.clamp(tau * s_max, max=1.0)  # shape: (B,), s <= 1.0 を保証
+
+        # 6. ロジット空間で非正解クラスをスケーリング
         outputs_calibrated = outputs.clone()
-        outputs_calibrated[torch.arange(len(labels)), labels] = target_logits_calibrated
+        s_expanded = s.unsqueeze(1).expand(B, C)  # shape: (B, C)
 
-        # optional: 非 target logits の再スケーリング
-        non_target_mask = torch.ones_like(outputs, dtype=torch.bool)
-        non_target_mask[torch.arange(len(labels)), labels] = False
-        outputs_calibrated[non_target_mask] = outputs_calibrated[non_target_mask] / alpha**0.5
+        # 非正解クラスのロジットのみを s 倍（ロジット空間での縮小）
+        outputs_calibrated = torch.where(non_gt_mask, outputs_calibrated * s_expanded, outputs_calibrated)
+
+        logits.append(outputs_calibrated.cpu())
+
+    return logits
+
+  def inference_with_loca_extended(net: BaseModel, data_loader: DataLoader, device: torch.device, tau: float = 0.92, alpha: float = 0.1) -> list[torch.Tensor]:
+    """
+    LoCa拡張版: 正解クラスも微調整するバージョン
+
+    Args:
+        alpha: 正解クラスを増幅する割合（0で元のLoCaと同じ）
+    """
+    net.to(device)
+    net.eval()
+    logits = []
+
+    with torch.no_grad():
+      for batch in data_loader:
+        images = batch["image"].to(device)
+        labels = batch["label"].to(device)
+
+        outputs = net.predict(images)
+        B, C = outputs.shape
+
+        probs = torch.nn.functional.softmax(outputs, dim=1)
+        non_gt_mask = torch.ones(B, C, dtype=torch.bool, device=device)
+        non_gt_mask[torch.arange(B, device=device), labels] = False
+
+        p_biggest = probs.masked_fill(~non_gt_mask, -1).max(dim=1).values
+        p_gt = probs[torch.arange(B, device=device), labels]
+
+        s_max = 1.0 / (1 - p_gt + p_biggest + 1e-8)
+        s = torch.clamp(tau * s_max, max=1.0)
+
+        outputs_calibrated = outputs.clone()
+        s_expanded = s.unsqueeze(1).expand(B, C)
+
+        # 非正解クラスを s 倍
+        outputs_calibrated = torch.where(non_gt_mask, outputs_calibrated * s_expanded, outputs_calibrated)
+
+        # 正解クラスは少し増幅（sが小さいほど強めに）
+        if alpha > 0:
+          outputs_calibrated[torch.arange(B, device=device), labels] *= 1 + alpha * (1 - s)
 
         logits.append(outputs_calibrated.cpu())
 

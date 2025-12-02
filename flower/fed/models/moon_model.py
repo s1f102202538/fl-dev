@@ -10,8 +10,6 @@ from .simple_cnn import SimpleCNN, SimpleCNN_header, SimpleCNNMNIST, SimpleCNNMN
 
 
 class ModelFedCon(BaseModel):
-  """統一されたベースのMOONモデル（projection headあり）"""
-
   def __init__(self, base_model: str, out_dim: int = 256, n_classes: int = 10):
     super().__init__()
 

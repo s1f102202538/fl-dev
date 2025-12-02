@@ -111,7 +111,7 @@ class FedMoonParamsShareClient(NumPyClient):
 
   def _generate_logits(self) -> list:
     """Generate logits from the trained model."""
-    logits = CNNTask.inference_with_label_correction(self.net, self.public_test_data, device=self.device)
+    logits = CNNTask.inference_with_loca(self.net, self.public_test_data, device=self.device)
     print(f"[DEBUG] Generated logits from {len(logits)} batches")
     return logits
 
@@ -135,7 +135,6 @@ class FedMoonParamsShareClient(NumPyClient):
         lr=0.01,
         epochs=self.local_epochs,
         args_optimizer="sgd",
-        weight_decay=1e-5,
       )
     else:
       print("[INFO] No previous model available, performing normal training")

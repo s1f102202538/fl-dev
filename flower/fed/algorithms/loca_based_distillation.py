@@ -57,23 +57,29 @@ class LoCaBasedDistillation:
   def _loca_calibrate_teacher_logits(
     teacher_logits: torch.Tensor,
     labels: torch.Tensor,
-    alpha: float = 0.9,
+    tau: float = 0.9,
   ) -> torch.Tensor:
     """LoCa ロジット校正（Teacher ロジットに適用）
 
-    論文ベースの実装:
-      1. ロジットから通常の確率分布を計算
-      2. LoCa で非正解クラスを縮小、正解クラスを調整
+    論文準拠の実装（ロジット空間で補正）:
+      1. ロジットから確率分布を計算して縮小係数 s を求める
+      2. 非正解クラスのロジットを s でスケーリング（ロジット空間）
+      3. 補正後のロジットを返す
 
-    温度スケーリングは呼び出し側で適用することを想定。
+    LoCa 論文の定義:
+      s_max = 1 / (1 - p_y + p_biggest)
+      s = τ * s_max
+      ここで τ は "shrink factor" (0 < τ ≤ 1)
+      τ が小さいほど非正解クラスを強く抑制
 
     Args:
         teacher_logits: shape (B, C) の未正規化ロジット（クライアントから集約済み）
         labels: shape (B,) のラベル（サーバの公開データから取得）
-        alpha: LoCa のハイパーパラメータ（0～1、デフォルト 0.9）
+        tau: LoCa の縮小係数 τ（0 < τ ≤ 1、デフォルト 0.9）
+             τ=1.0 で最小限の補正、τ→0 で強い抑制
 
     Returns:
-        LoCa 補正後の確率分布 [B, C]
+        LoCa 補正後のロジット [B, C]
     """
     if teacher_logits.dim() != 2:
       raise ValueError(f"teacher_logits must be 2D, got {teacher_logits.shape}")
@@ -81,32 +87,34 @@ class LoCaBasedDistillation:
     B, C = teacher_logits.shape
     device = teacher_logits.device
 
-    # ステップ 1: ロジットから確率分布を計算
-    probs = F.softmax(teacher_logits, dim=1)
+    # ステップ 1: ロジットから確率分布を計算（s の計算のため）
+    with torch.no_grad():
+      probs = F.softmax(teacher_logits, dim=1)
 
-    # ステップ 2: 非正解クラスの最大確率を求める
-    non_gt_mask = torch.ones_like(probs, dtype=torch.bool)
-    non_gt_mask[torch.arange(B, device=device), labels] = False
-    p_biggest = probs.masked_fill(~non_gt_mask, -1).max(dim=1).values  # shape: (B,)
+      # ステップ 2: 非正解クラスの最大確率を求める
+      non_gt_mask = torch.ones(B, C, dtype=torch.bool, device=device)
+      non_gt_mask[torch.arange(B, device=device), labels] = False
+      p_biggest = probs.masked_fill(~non_gt_mask, -1).max(dim=1).values  # shape: (B,)
 
-    # ステップ 3: 正解クラスの確率を取得
-    p_gt = probs[torch.arange(B, device=device), labels]  # shape: (B,)
+      # ステップ 3: 正解クラスの確率を取得
+      p_gt = probs[torch.arange(B, device=device), labels]  # shape: (B,)
 
-    # ステップ 4: LoCa のしきい値 s を計算（式 18）
-    # s_max = 1.0 / (1 - p_gt + p_biggest)
-    # s = alpha * s_max
-    s_max = 1.0 / (1 - p_gt + p_biggest + 1e-8)  # 数値安定性
-    s = (alpha * s_max).unsqueeze(1)  # shape: (B, 1)
+      # ステップ 4: LoCa のスケーリング係数 s を計算
+      # s_max = 1.0 / (1 - p_y + p_biggest)
+      # s = τ * s_max
+      # 注意: s_max が 1 を超える可能性があるため、s を 1.0 以下にクリップ
+      # （s > 1.0 だと非正解クラスを増幅してしまい、抑制の意図と逆になる）
+      s_max = 1.0 / (1 - p_gt + p_biggest + 1e-8)  # 数値安定性
+      s = torch.clamp(tau * s_max, max=1.0)  # shape: (B,), s <= 1.0 を保証
 
-    # ステップ 5: 非正解クラスの確率のみを s 倍に縮小
-    probs_loca = probs.clone()
-    probs_loca[non_gt_mask] *= s.squeeze(1).repeat_interleave(C - 1)
+    # ステップ 5: ロジット空間で非正解クラスをスケーリング
+    logits_loca = teacher_logits.clone()
+    s_expanded = s.unsqueeze(1).expand(B, C)  # shape: (B, C)
 
-    # ステップ 6: 正解クラスの確率を残りの確率として再計算
-    sum_non_gt = probs_loca[non_gt_mask].view(B, C - 1).sum(dim=1)
-    probs_loca[torch.arange(B, device=device), labels] = 1.0 - sum_non_gt
+    # 非正解クラスのロジットのみを s 倍（ロジット空間での縮小）
+    logits_loca = torch.where(non_gt_mask, logits_loca * s_expanded, logits_loca)
 
-    return probs_loca
+    return logits_loca
 
   def train_knowledge_distillation(
     self,
@@ -120,7 +128,7 @@ class LoCaBasedDistillation:
     early_stopping_patience: int = 5,
     grad_clip: float = 1.0,
     debug_print_first_batch: bool = True,
-    loca_alpha: float = 0.5,
+    loca_tau: float = 0.92,
   ) -> BaseModel:
     """
     実際の蒸留学習ループ（LoCa を組み込んだ版）
@@ -140,7 +148,8 @@ class LoCaBasedDistillation:
         early_stopping_patience: early stopping の patience
         grad_clip: gradient clipping の閾値
         debug_print_first_batch: 最初のバッチでデバッグ情報を表示
-        loca_alpha: LoCa のハイパーパラメータ（0～1、デフォルト 0.9）
+        loca_tau: LoCa の縮小係数 τ（0 < τ ≤ 1、デフォルト 0.9）
+                  τ が小さいほど非正解クラスを強く抑制
 
     Returns:
         蒸留後の student モデル
@@ -205,30 +214,29 @@ class LoCaBasedDistillation:
         if not isinstance(student_logits, torch.Tensor):
           raise TypeError("studentModel.predict / forward must return a torch.Tensor of logits")
 
-        # --- LoCa 校正 ---
+        # --- LoCa 校正 + 温度スケーリング ---
         # teacher_logits: クライアントから送信された補正なしの集約ロジット
         # labels: サーバの公開データから取得したラベル
-        # → サーバ側で LoCa 補正を適用後、温度 T でスケーリング
+        # → ロジット空間で LoCa 補正 → 温度スケーリング → softmax
         with torch.no_grad():
-          # 1. LoCa 補正（確率分布を返す）
-          teacher_probs_loca = self._loca_calibrate_teacher_logits(teacher_logits.detach(), labels, loca_alpha)
+          # 1. LoCa 補正（ロジット空間で非正解クラスをスケーリング）
+          teacher_logits_loca = self._loca_calibrate_teacher_logits(teacher_logits.detach(), labels, loca_tau)
 
-          # 2. LoCa 補正後の確率分布に温度 T を適用
-          if T != 1.0:
-            # 確率を logits に変換 → 温度適用 → softmax
-            teacher_logits_loca = torch.log(teacher_probs_loca + 1e-8)
-            teacher_probs = F.softmax(teacher_logits_loca / T, dim=1)
-          else:
-            teacher_probs = teacher_probs_loca
+          # 2. 温度スケーリング + softmax で確率分布に変換
+          teacher_probs = F.softmax(teacher_logits_loca / T, dim=1)
 
           # numerical clamp
           teacher_probs = torch.clamp(teacher_probs, min=1e-8, max=1.0 - 1e-8)
 
+          # teacher の log 確率も計算（KL divergence用）
+          teacher_log_probs = torch.log(teacher_probs)
+
         # --- student log probs with temperature ---
         student_log_probs = F.log_softmax(student_logits / T, dim=1)
 
-        # --- distillation (KL) loss: KL(teacher || student)
-        distillation_loss = F.kl_div(student_log_probs, teacher_probs, reduction="batchmean") * (T * T)
+        # --- distillation (KL) loss: KL(teacher || student) ---
+        # log_target=True により KL(P_teacher || P_student) を計算
+        distillation_loss = F.kl_div(student_log_probs, teacher_log_probs, reduction="batchmean", log_target=True) * (T * T)
 
         # --- normal CE loss on raw logits ---
         student_ce_loss = ce_loss(student_logits, labels)
