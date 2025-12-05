@@ -200,7 +200,10 @@ class FedKDParamsShare(Strategy):
     ndarrays = [val.cpu().numpy() for _, val in self.server_model.state_dict().items()]
     parameters = ndarrays_to_parameters(ndarrays)
 
-    print(f"[FedKD-ParamsShare] Round {server_round}: Sending model parameters to clients")
+    # Calculate parameter size (server -> client communication)
+    self.last_params_size_mb = calculate_communication_cost(parameters)["size_mb"]
+
+    print(f"[FedKD-ParamsShare] Round {server_round}: Sending model parameters to clients (size: {self.last_params_size_mb:.4f} MB)")
 
     fit_ins = FitIns(parameters, config)
 
@@ -239,7 +242,10 @@ class FedKDParamsShare(Strategy):
       return None, {}
 
     # Calculate communication costs
-    params_size_mb = calculate_communication_cost(ndarrays_to_parameters([val.cpu().numpy() for _, val in self.server_model.state_dict().items()]))["size_mb"]
+    # Parameter size: from configure_fit (server -> client)
+    params_size_mb = getattr(self, "last_params_size_mb", 0.0)
+
+    # Logit size: calculate from received logits (client -> server)
     logits_size_mb = sum(calculate_data_size_mb(str(fit_res.metrics.get("logits", ""))) for _, fit_res in results if "logits" in fit_res.metrics) / len(
       client_logits_list
     )

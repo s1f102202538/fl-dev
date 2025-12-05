@@ -111,7 +111,7 @@ class FedMoonParamsShareClient(NumPyClient):
 
   def _generate_logits(self) -> list:
     """Generate logits from the trained model."""
-    logits = CNNTask.inference_with_loca(self.net, self.public_test_data, device=self.device)
+    logits = CNNTask.inference_with_loca_extended(self.net, self.public_test_data, device=self.device)
     print(f"[DEBUG] Generated logits from {len(logits)} batches")
     return logits
 
