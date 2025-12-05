@@ -6,13 +6,13 @@ from torch import nn
 from ..models.base_model import BaseModel
 
 
-class MoonContrastiveLearning:
+class LogitCalibrationMoonContrastiveLearning:
   """FedMoon対比学習"""
 
   def __init__(
     self,
-    mu: float = 5.0,
-    temperature: float = 0.5,
+    mu: float = 3.0,
+    temperature: float = 0.3,
     device: torch.device | None = None,
   ):
     """Moon対比学習を初期化
@@ -118,13 +118,47 @@ class MoonContrastiveLearning:
 
     return contrastive_loss
 
+  def _apply_fedlc_calibration(self, outputs: torch.Tensor, labels: torch.Tensor, class_counts: torch.Tensor, tau: float = 1.0) -> torch.Tensor:
+    """
+    FedLC 校正をロジットに適用
+    outputs: (B, C) ロジット
+    labels: (B,) 正解ラベル
+    class_counts: (C,) クラスごとのサンプル数
+    tau: 校正スケーリング係数
+    """
+    device = outputs.device
+    n_classes = outputs.size(1)
+    margin = torch.zeros_like(outputs)
 
-class MoonTrainer:
+    # FedLC の pairwise margin: Δ(y,i) = τ * (n_y^{-1/4} - n_i^{-1/4})
+    class_counts = class_counts.float().to(device)
+    class_counts_pow = class_counts.pow(-0.25)  # n_c^{-1/4}
+
+    for i in range(n_classes):
+      margin[:, i] = tau * (class_counts_pow[labels] - class_counts_pow[i])
+
+    # correct class を補正
+    outputs_calibrated = outputs + margin
+    return outputs_calibrated
+
+  def _compute_class_counts(self, train_loader, num_classes: int = 10):
+    class_counts = torch.zeros(num_classes, dtype=torch.long)
+
+    for batch in train_loader:
+      labels = batch["label"]
+      counts = torch.bincount(labels, minlength=num_classes)
+      class_counts += counts
+
+    class_counts[class_counts == 0] = 1
+    return class_counts
+
+
+class LogitCalibrationMoonTrainer:
   """FedMoon訓練実装"""
 
   def __init__(
     self,
-    moon_learner: MoonContrastiveLearning,
+    moon_learner: LogitCalibrationMoonContrastiveLearning,
     device: torch.device | None = None,
   ):
     """Moonトレーナーを初期化
@@ -143,6 +177,7 @@ class MoonTrainer:
     lr: float,
     epochs: int,
     args_optimizer: str = "sgd",
+    weight_decay: float = 1e-5,
   ) -> float:
     """FedMoon対比学習による訓練
 
@@ -162,15 +197,17 @@ class MoonTrainer:
 
     # 元論文準拠：オプティマイザーの設定
     if args_optimizer == "adam":
-      optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
+      optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
     else:  # SGD (default)
-      optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9)
+      optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9, weight_decay=weight_decay)
 
-    print(f"[MOON] Using optimizer={args_optimizer}, LR={lr:.6f}")
+    print(f"[MOON] Using optimizer={args_optimizer}, LR={lr:.6f}, weight_decay={weight_decay}")
 
     model.train()
     running_loss = 0.0
     total_batches = 0
+
+    class_counts = self.moon_learner._compute_class_counts(train_loader, 10)
 
     for epoch in range(epochs):
       epoch_loss_collector = []
@@ -185,9 +222,8 @@ class MoonTrainer:
 
         # フォワードパス
         h, proj, outputs = model(images)
-
-        # 標準クロスエントロピー損失
-        loss1 = criterion(outputs, labels)
+        outputs_calibrated = self.moon_learner._apply_fedlc_calibration(outputs, labels, class_counts, tau=3.0)
+        loss1 = criterion(outputs_calibrated, labels)
 
         # 対比損失
         loss2 = torch.tensor(0.0, device=self.device)
@@ -205,7 +241,7 @@ class MoonTrainer:
 
         total_loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
         optimizer.step()
 

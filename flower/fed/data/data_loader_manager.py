@@ -118,6 +118,10 @@ class DataLoaderManager:
 
     # Load train partition (Non-IID) - specific to each client
     train_partition = fds.load_partition(config.partition_id, "train")
+
+    # Limit training samples to configured maximum
+    train_partition = train_partition.select(range(min(config.train_max_samples, len(train_partition))))
+
     train_partition = train_partition.with_transform(transform_manager.apply_train_transforms)
 
     train_loader = DataLoader(train_partition, batch_size=config.batch_size, shuffle=config.shuffle_train)  # type: ignore

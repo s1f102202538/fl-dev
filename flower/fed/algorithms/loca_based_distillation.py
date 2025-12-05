@@ -11,21 +11,18 @@ from torch.utils.data import DataLoader
 from ..models.base_model import BaseModel
 
 
-class Distillation:
+class LoCaBasedDistillation:
   def __init__(
     self,
     studentModel: BaseModel,
     public_data: DataLoader,
     soft_targets: List[torch.Tensor],
-    *,
-    shuffle_public_data: bool = False,
   ) -> None:
     """
     Args:
         studentModel: 生徒モデル（BaseModel）
         public_data: 公開データの DataLoader（**shuffle=False を推奨**）
         soft_targets: サーバから渡されたソフトターゲット（通常は logits のリスト）
-        shuffle_public_data: DataLoader が shuffle=True の場合、対応が崩れるので False を推奨
     """
     self.studentModel = studentModel
     self.public_data = public_data
@@ -34,9 +31,6 @@ class Distillation:
     self.is_batch_list = isinstance(soft_targets, list) and len(soft_targets) > 0 and isinstance(soft_targets[0], torch.Tensor)
     if self.is_batch_list:
       self._validate_batch_counts()
-
-    if shuffle_public_data:
-      print("Warning: public_data was created with shuffle=True. This often breaks correspondence with soft_targets.")
 
   def _validate_batch_counts(self) -> None:
     expected_batches = len(self.public_data)
@@ -59,6 +53,69 @@ class Distillation:
 
     return False, best_loss, patience_counter
 
+  @staticmethod
+  def _loca_calibrate_teacher_logits(
+    teacher_logits: torch.Tensor,
+    labels: torch.Tensor,
+    tau: float = 0.9,
+  ) -> torch.Tensor:
+    """LoCa ロジット校正（Teacher ロジットに適用）
+
+    論文準拠の実装（ロジット空間で補正）:
+      1. ロジットから確率分布を計算して縮小係数 s を求める
+      2. 非正解クラスのロジットを s でスケーリング（ロジット空間）
+      3. 補正後のロジットを返す
+
+    LoCa 論文の定義:
+      s_max = 1 / (1 - p_y + p_biggest)
+      s = τ * s_max
+      ここで τ は "shrink factor" (0 < τ ≤ 1)
+      τ が小さいほど非正解クラスを強く抑制
+
+    Args:
+        teacher_logits: shape (B, C) の未正規化ロジット（クライアントから集約済み）
+        labels: shape (B,) のラベル（サーバの公開データから取得）
+        tau: LoCa の縮小係数 τ（0 < τ ≤ 1、デフォルト 0.9）
+             τ=1.0 で最小限の補正、τ→0 で強い抑制
+
+    Returns:
+        LoCa 補正後のロジット [B, C]
+    """
+    if teacher_logits.dim() != 2:
+      raise ValueError(f"teacher_logits must be 2D, got {teacher_logits.shape}")
+
+    B, C = teacher_logits.shape
+    device = teacher_logits.device
+
+    # ステップ 1: ロジットから確率分布を計算（s の計算のため）
+    with torch.no_grad():
+      probs = F.softmax(teacher_logits, dim=1)
+
+      # ステップ 2: 非正解クラスの最大確率を求める
+      non_gt_mask = torch.ones(B, C, dtype=torch.bool, device=device)
+      non_gt_mask[torch.arange(B, device=device), labels] = False
+      p_biggest = probs.masked_fill(~non_gt_mask, -1).max(dim=1).values  # shape: (B,)
+
+      # ステップ 3: 正解クラスの確率を取得
+      p_gt = probs[torch.arange(B, device=device), labels]  # shape: (B,)
+
+      # ステップ 4: LoCa のスケーリング係数 s を計算
+      # s_max = 1.0 / (1 - p_y + p_biggest)
+      # s = τ * s_max
+      # 注意: s_max が 1 を超える可能性があるため、s を 1.0 以下にクリップ
+      # （s > 1.0 だと非正解クラスを増幅してしまい、抑制の意図と逆になる）
+      s_max = 1.0 / (1 - p_gt + p_biggest + 1e-8)  # 数値安定性
+      s = torch.clamp(tau * s_max, max=1.0)  # shape: (B,), s <= 1.0 を保証
+
+    # ステップ 5: ロジット空間で非正解クラスをスケーリング
+    logits_loca = teacher_logits.clone()
+    s_expanded = s.unsqueeze(1).expand(B, C)  # shape: (B, C)
+
+    # 非正解クラスのロジットのみを s 倍（ロジット空間での縮小）
+    logits_loca = torch.where(non_gt_mask, logits_loca * s_expanded, logits_loca)
+
+    return logits_loca
+
   def train_knowledge_distillation(
     self,
     epochs: int,
@@ -71,20 +128,31 @@ class Distillation:
     early_stopping_patience: int = 5,
     grad_clip: float = 1.0,
     debug_print_first_batch: bool = True,
+    loca_tau: float = 0.92,
   ) -> BaseModel:
     """
-    実際の蒸留学習ループ（改良版）
+    実際の蒸留学習ループ（LoCa を組み込んだ版）
+
+    前提:
+        - クライアントから送信されるロジットは補正なし（生のロジット）
+        - サーバ側でこのメソッドが公開データのラベルを使って LoCa 補正を適用
+        - 補正により非正解クラスを縮小し、正解クラスを強調
 
     Args:
         epochs: epoch 数
         learning_rate: 学習率
-        T: 温度
+        T: 温度 (distillation temperature)
         alpha: KL 蒸留損失の重み
         beta: CE 損失の重み
         device: cpu / cuda device
-        early_stopping_patience: 早期終了の patience
-        grad_clip: 勾配クリッピングの max_norm
-        debug_print_first_batch: 先頭バッチ時にデバッグ統計を出力するか
+        early_stopping_patience: early stopping の patience
+        grad_clip: gradient clipping の閾値
+        debug_print_first_batch: 最初のバッチでデバッグ情報を表示
+        loca_tau: LoCa の縮小係数 τ（0 < τ ≤ 1、デフォルト 0.9）
+                  τ が小さいほど非正解クラスを強く抑制
+
+    Returns:
+        蒸留後の student モデル
     """
 
     ce_loss = nn.CrossEntropyLoss()
@@ -124,35 +192,40 @@ class Distillation:
         labels = labels.to(device)
 
         # teacher batch (from server)
-        soft_batch = self.soft_targets[batch_idx]  # already moved to device above
+        teacher_logits = self.soft_targets[batch_idx]  # already moved to device above
 
         # --- ensure shapes match ---
-        # teacher may be logits or probabilities; detect it
-        if soft_batch.dim() != 2:
-          raise ValueError(f"soft_targets[{batch_idx}] must be 2D (batch_size, num_classes), got shape {soft_batch.shape}")
+        if teacher_logits.dim() != 2:
+          raise ValueError(f"soft_targets[{batch_idx}] must be 2D (batch_size, num_classes), got shape {teacher_logits.shape}")
 
         # optionally align batch sizes: if different, use min samples
-        if soft_batch.size(0) != inputs.size(0):
-          # 可能なら警告してから min 部分のみ使用
-          min_bs = min(soft_batch.size(0), inputs.size(0))
-          print(f"Warning: batch size mismatch at batch {batch_idx}: inputs {inputs.size(0)}, soft_targets {soft_batch.size(0)}. Using first {min_bs} samples.")
+        if teacher_logits.size(0) != inputs.size(0):
+          min_bs = min(teacher_logits.size(0), inputs.size(0))
+          print(
+            f"Warning: batch size mismatch at batch {batch_idx}: inputs {inputs.size(0)}, soft_targets {teacher_logits.size(0)}. Using first {min_bs} samples."
+          )
           inputs = inputs[:min_bs]
           labels = labels[:min_bs]
-          soft_batch = soft_batch[:min_bs]
+          teacher_logits = teacher_logits[:min_bs]
 
         optimizer.zero_grad()
 
         student_logits = self.studentModel.predict(inputs)
-
         if not isinstance(student_logits, torch.Tensor):
           raise TypeError("studentModel.predict / forward must return a torch.Tensor of logits")
 
+        # --- LoCa 校正 + 温度スケーリング ---
+        # teacher_logits: クライアントから送信された補正なしの集約ロジット
+        # labels: サーバの公開データから取得したラベル
+        # → ロジット空間で LoCa 補正 → 温度スケーリング → softmax
         with torch.no_grad():
-          teacher_logits = soft_batch.detach()
-          teacher_probs = F.softmax(teacher_logits / T, dim=1)
+          # 1. LoCa 補正（ロジット空間で非正解クラスをスケーリング）
+          teacher_logits_loca = self._loca_calibrate_teacher_logits(teacher_logits.detach(), labels, loca_tau)
 
-          # --- make sure teacher_probs is detached and stable ---
-          # numerical clamp optional (avoid exact 0)
+          # 2. 温度スケーリング + softmax で確率分布に変換
+          teacher_probs = F.softmax(teacher_logits_loca / T, dim=1)
+
+          # numerical clamp
           teacher_probs = torch.clamp(teacher_probs, min=1e-8, max=1.0 - 1e-8)
 
           # teacher の log 確率も計算（KL divergence用）
@@ -191,9 +264,7 @@ class Distillation:
             )
             print("=============================================")
           except Exception:
-            # 保険: データが GPU 上、numpy に変換できない等のケースで落ちないようにする
             pass
-          # only print once
           debug_print_first_batch = False
 
       # end batches

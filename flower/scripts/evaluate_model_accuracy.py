@@ -179,7 +179,7 @@ def get_device(device_arg: str) -> torch.device:
   return torch.device(device_arg)
 
 
-def load_iid_train_data(dataset_name: str, batch_size: int, train_samples: int = None) -> DataLoader:
+def load_iid_train_data(dataset_name: str, batch_size: int, train_samples: int) -> DataLoader:
   """IID訓練データをロード
 
   Args:
@@ -201,7 +201,6 @@ def load_iid_train_data(dataset_name: str, batch_size: int, train_samples: int =
     print("   Using all available train samples")
 
   train_dataset = load_dataset(dataset_name, split=split_str)
-  print(f"   Loaded {len(train_dataset)} samples")
 
   # データ変換の準備
   from fed.data.data_loader_config import DataLoaderConfig
@@ -223,7 +222,7 @@ def load_iid_train_data(dataset_name: str, batch_size: int, train_samples: int =
   return train_loader
 
 
-def load_iid_test_data(dataset_name: str, batch_size: int, test_samples: int = None) -> DataLoader:
+def load_iid_test_data(dataset_name: str, batch_size: int, test_samples: int) -> DataLoader:
   """IIDテストデータをロード
 
   Args:
@@ -245,7 +244,6 @@ def load_iid_test_data(dataset_name: str, batch_size: int, test_samples: int = N
     print("   Using all available test samples")
 
   test_dataset = load_dataset(dataset_name, split=split_str)
-  print(f"   Loaded {len(test_dataset)} samples")
 
   # データ変換の準備
   # データセット名から設定を推測
@@ -305,8 +303,8 @@ def train_model(model, train_loader, epochs, lr, device, verbose=False):
   """
   print(f"\n🏋️  Training model on {device}")
   print(f"   Epochs: {epochs}")
-  print(f"   Learning rate: {lr}")
-  print(f"   Batches per epoch: {len(train_loader)}")
+  print(f"   LearninBatchesg rate: {lr}")
+  print(f"    per epoch: {len(train_loader)}")
 
   model.to(device)
   final_loss = CNNTask.train(
@@ -401,13 +399,6 @@ def main():
       verbose=args.verbose,
     )
 
-    # モデルの保存（指定されている場合）
-    if args.save_model:
-      save_path = Path(args.save_model)
-      save_path.parent.mkdir(parents=True, exist_ok=True)
-      torch.save(model.state_dict(), save_path)
-      print(f"\n💾 Model saved to: {save_path}")
-
   # テストデータのロード
   test_loader = load_iid_test_data(
     dataset_name=args.dataset,
@@ -439,7 +430,6 @@ def main():
   elif not args.no_train:
     print("   ✅ Model was trained in this session")
     print(f"   Training epochs: {args.epochs}")
-    print(f"   Final training loss: {train_loss:.6f}")
   else:
     print("   ✅ Model loaded from checkpoint")
     print("   Expected accuracy depends on training quality")

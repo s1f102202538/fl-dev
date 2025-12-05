@@ -6,29 +6,41 @@ from torch import nn
 from ..models.base_model import BaseModel
 
 
-class MoonContrastiveLearning:
+class CsdBasedMoonContrastiveLearning:
   """FedMoon対比学習"""
 
   def __init__(
     self,
-    mu: float = 5.0,
-    temperature: float = 0.5,
+    mu: float = 3.0,
+    temperature: float = 0.3,
+    lambda_csd: float = 0.5,  # CSD損失の重み
+    csd_temperature: float = 0.3,  # CSD用の温度パラメータ
+    csd_margin: float = 0.1,  # CSD正例マージン
     device: torch.device | None = None,
   ):
-    """Moon対比学習を初期化
+    """初期化
 
     Args:
         mu: 対比損失の重み
         temperature: 対比損失の温度
+        lambda_csd: CSD損失の重み
+        csd_temperature: CSD用の温度パラメータ
+        csd_margin: CSD正例マージン
         device: 計算に使用するデバイス
     """
     self.mu = mu
     self.temperature = temperature
+    self.lambda_csd = lambda_csd
+    self.csd_temperature = csd_temperature
+    self.csd_margin = csd_margin
     self.device = device or torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # 対比学習のためのモデル
     self.global_model = None
     self.previous_model = None  # 単一の前回モデルを保持
+
+    # CSD用のクラスプロトタイプ
+    self.class_prototypes: torch.Tensor | None = None
 
   def update_models(self, previous_model: BaseModel, global_model: BaseModel) -> None:
     """グローバルモデルと前回モデルの状態を更新
@@ -63,6 +75,62 @@ class MoonContrastiveLearning:
 
     has_previous = self.previous_model is not None
     print(f"MOON models updated: mu={self.mu}, temperature={self.temperature}, has_previous_model={has_previous}")
+
+  def set_class_prototypes(self, class_prototypes: torch.Tensor) -> None:
+    """クラスプロトタイプを設定
+
+    Args:
+        class_prototypes: クラスプロトタイプ [n_classes, logit_dim]
+    """
+    self.class_prototypes = class_prototypes.to(self.device)
+    print(f"[CSD] Class prototypes set: shape={self.class_prototypes.shape}")
+
+  def compute_csd_loss(self, logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    """クラスプロトタイプとの類似度に基づく蒸留損失を計算
+
+    Args:
+        logits: モデルの出力ロジット [batch_size, n_classes]
+        labels: 正解ラベル [batch_size]
+
+    Returns:
+        CSD損失
+    """
+    if self.class_prototypes is None:
+      return torch.tensor(0.0, device=self.device, requires_grad=True)
+
+    # ロジットを正規化
+    logits_normalized = torch.nn.functional.normalize(logits, p=2, dim=1)
+    prototypes_normalized = torch.nn.functional.normalize(self.class_prototypes, p=2, dim=1)
+
+    # コサイン類似度を計算 [batch_size, n_classes]
+    similarity = torch.mm(logits_normalized, prototypes_normalized.t())
+    similarity = similarity / self.csd_temperature
+
+    # similarity: [B, C]
+    B = similarity.size(0)
+    C = similarity.size(1)
+
+    # 正例クラスにマージンを追加
+    pos_mask = torch.zeros_like(similarity, dtype=torch.bool)
+    pos_mask.scatter_(1, labels.unsqueeze(1), True)
+    similarity[pos_mask] += self.csd_margin
+
+    # 正例クラス類似度
+    pos_sim = similarity.gather(1, labels.unsqueeze(1))  # [B, 1]
+
+    # 負例マスク：正解クラス以外
+    neg_mask = torch.arange(C, device=self.device).unsqueeze(0) != labels.unsqueeze(1)  # [B, C]
+    neg_sim = similarity[neg_mask].view(B, C - 1)  # [B, C-1]
+
+    # 負例を遠ざける：負例の平均類似度を下げたい
+    neg_loss = torch.mean(torch.logsumexp(neg_sim, dim=1))
+
+    # 正例を近づける
+    pos_loss = -torch.mean(pos_sim)
+
+    csd_loss = pos_loss + neg_loss
+
+    return csd_loss
 
   def compute_contrastive_loss(self, features: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
     """対比損失計算
@@ -119,12 +187,12 @@ class MoonContrastiveLearning:
     return contrastive_loss
 
 
-class MoonTrainer:
+class CsdBasedMoonTrainer:
   """FedMoon訓練実装"""
 
   def __init__(
     self,
-    moon_learner: MoonContrastiveLearning,
+    moon_learner: CsdBasedMoonContrastiveLearning,
     device: torch.device | None = None,
   ):
     """Moonトレーナーを初期化
@@ -143,6 +211,8 @@ class MoonTrainer:
     lr: float,
     epochs: int,
     args_optimizer: str = "sgd",
+    weight_decay: float = 1e-5,
+    class_prototypes: torch.Tensor | None = None,
   ) -> float:
     """FedMoon対比学習による訓練
 
@@ -153,20 +223,24 @@ class MoonTrainer:
         epochs: エポック数
         args_optimizer: オプティマイザータイプ
         weight_decay: 重み減衰
+        class_prototypes: CSD用のクラスプロトタイプ [n_classes, logit_dim]
 
     Returns:
         平均訓練損失
     """
+    # クラスプロトタイプを設定
+    if class_prototypes is not None:
+      self.moon_learner.set_class_prototypes(class_prototypes)
     model.to(self.device)
     criterion = nn.CrossEntropyLoss().to(self.device)
 
     # 元論文準拠：オプティマイザーの設定
     if args_optimizer == "adam":
-      optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
+      optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, weight_decay=weight_decay)
     else:  # SGD (default)
-      optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9)
+      optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9, weight_decay=weight_decay)
 
-    print(f"[MOON] Using optimizer={args_optimizer}, LR={lr:.6f}")
+    print(f"[MOON] Using optimizer={args_optimizer}, LR={lr:.6f}, weight_decay={weight_decay}")
 
     model.train()
     running_loss = 0.0
@@ -176,6 +250,7 @@ class MoonTrainer:
       epoch_loss_collector = []
       epoch_loss1_collector = []  # CE損失
       epoch_loss2_collector = []  # 対比損失
+      epoch_loss3_collector = []  # CSD損失
 
       for batch in train_loader:
         images = batch["image"].to(self.device)
@@ -195,17 +270,23 @@ class MoonTrainer:
           contrastive_loss = self.moon_learner.compute_contrastive_loss(proj, images)
           loss2 = self.moon_learner.mu * contrastive_loss
 
+        # CSD損失（クラスプロトタイプとの類似度）
+        loss3 = torch.tensor(0.0, device=self.device)
+        if self.moon_learner.class_prototypes is not None:
+          csd_loss = self.moon_learner.compute_csd_loss(outputs, labels)
+          loss3 = self.moon_learner.lambda_csd * csd_loss
+
         # 総損失
-        total_loss = loss1 + loss2
+        total_loss = loss1 + loss2 + loss3
 
         # NaN detection and handling
         if torch.isnan(total_loss) or torch.isinf(total_loss):
-          print(f"Warning: Loss became NaN/Inf. loss1={loss1.item()}, loss2={loss2.item()}")
+          print(f"Warning: Loss became NaN/Inf. loss1={loss1.item()}, loss2={loss2.item()}, loss3={loss3.item()}")
           continue  # Skip this batch
 
         total_loss.backward()
 
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        # torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 
         optimizer.step()
 
@@ -213,6 +294,7 @@ class MoonTrainer:
         epoch_loss_collector.append(total_loss.item())
         epoch_loss1_collector.append(loss1.item())
         epoch_loss2_collector.append(loss2.item())
+        epoch_loss3_collector.append(loss3.item())
         total_batches += 1
 
       # エポックごとの損失ログ
@@ -220,7 +302,15 @@ class MoonTrainer:
         epoch_loss = sum(epoch_loss_collector) / len(epoch_loss_collector)
         epoch_loss1 = sum(epoch_loss1_collector) / len(epoch_loss1_collector)
         epoch_loss2 = sum(epoch_loss2_collector) / len(epoch_loss2_collector)
-        print(f"Epoch: {epoch + 1}/{epochs}, Total Loss: {epoch_loss:.6f}, CE Loss: {epoch_loss1:.6f}, Contrastive Loss: {epoch_loss2:.6f}")
+        epoch_loss3 = sum(epoch_loss3_collector) / len(epoch_loss3_collector)
+
+        # CSD損失のログ出力
+        if self.moon_learner.class_prototypes is not None:
+          print(
+            f"Epoch: {epoch + 1}/{epochs}, Total Loss: {epoch_loss:.6f}, CE Loss: {epoch_loss1:.6f}, Contrastive Loss: {epoch_loss2:.6f}, CSD Loss: {epoch_loss3:.6f}"
+          )
+        else:
+          print(f"Epoch: {epoch + 1}/{epochs}, Total Loss: {epoch_loss:.6f}, CE Loss: {epoch_loss1:.6f}, Contrastive Loss: {epoch_loss2:.6f}")
 
     avg_train_loss = running_loss / total_batches if total_batches > 0 else 0.0
     return avg_train_loss

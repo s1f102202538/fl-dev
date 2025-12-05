@@ -24,7 +24,7 @@ class MiniCNN(BaseModel):
     self.fc1 = nn.Linear(128 * 4 * 4, 128)
     self.fc2 = nn.Linear(128, n_classes)
 
-  def forward(self, x: Tensor):
+  def forward(self, x: Tensor) -> Tensor:
     # 畳み込み層
     x = F.relu(self.conv1(x))
     x = self.pool(x)  # 32x32 -> 16x16
@@ -80,7 +80,7 @@ class MiniCNNMNIST(BaseModel):
 # 特徴量抽出用のヘッダークラス
 class MiniCNN_header(nn.Module):
   def __init__(self, dropout_rate: float = 0.2) -> None:
-    super(MiniCNN_header, self).__init__()
+    super().__init__()
 
     # CIFAR-10用畳み込み層（3チャンネル入力、32x32画像）
     self.conv1 = nn.Conv2d(3, 32, 3, padding=1)
@@ -118,7 +118,7 @@ class MiniCNNMNIST_header(nn.Module):
   """MNIST用のMiniCNNヘッダー（特徴量抽出のみ）"""
 
   def __init__(self, dropout_rate: float = 0.2) -> None:
-    super(MiniCNNMNIST_header, self).__init__()
+    super().__init__()
 
     # MNIST用畳み込み層（1チャンネル入力、28x28画像）
     self.conv1 = nn.Conv2d(1, 16, 3, padding=1)

@@ -11,7 +11,7 @@ from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
 from fed.util.communication_cost import calculate_data_size_mb
 from fed.util.model_util import base64_to_batch_list, batch_list_to_base64, create_run_dir
-from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, Parameters, Scalar
+from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, Parameters, Scalar, ndarrays_to_parameters
 from flwr.common.logger import log
 from flwr.common.typing import UserConfig
 from flwr.server.client_manager import ClientManager
@@ -449,6 +449,15 @@ class FedKDDistillationModel(Strategy):
     # サーバーで生成されたロジットがある場合のみ追加
     if self.server_generated_logits:
       config["avg_logits"] = batch_list_to_base64(self.server_generated_logits)
+
+    # サーバーモデルのパラメータを取得してクライアントに送信
+    if self.server_model is not None:
+      ndarrays = [val.cpu().numpy() for _, val in self.server_model.state_dict().items()]
+      parameters = ndarrays_to_parameters(ndarrays)
+      print(f"[FedKD-DistillationModel] Round {server_round}: Sending server model parameters to clients for evaluation")
+    else:
+      print(f"[FedKD-DistillationModel] Round {server_round}: No server model available, using provided parameters")
+
     # 初回ラウンドではロジットが存在しないため、avg_logitsキーを含めない
     evaluate_ins = EvaluateIns(parameters, config)
 

@@ -8,7 +8,14 @@ from fed.algorithms.distillation import Distillation
 from fed.algorithms.moon import MoonContrastiveLearning, MoonTrainer
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
-from fed.util.model_util import base64_to_batch_list, batch_list_to_base64, filter_and_calibrate_logits, load_model_from_state, save_model_to_state
+from fed.util.model_util import (
+  base64_to_batch_list,
+  batch_list_to_base64,
+  filter_and_calibrate_logits,
+  load_model_from_state,
+  save_model_to_state,
+  set_weights,
+)
 from flwr.client import NumPyClient
 from flwr.common import RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
@@ -125,8 +132,8 @@ class FedMoonClient(NumPyClient):
       epochs=5,  # Increased from 3 for better distillation
       learning_rate=0.001,  # Reduced from 0.01 for more stable training
       T=temperature,
-      alpha=0.7,  # FedKD paper: KL distillation loss weight
-      beta=0.3,  # FedKD paper: CE loss weight
+      alpha=0.3,  # FedKD paper: KL distillation loss weight
+      beta=0.7,  # FedKD paper: CE loss weight
       device=self.device,
     )
 
@@ -154,7 +161,7 @@ class FedMoonClient(NumPyClient):
       return self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
-        lr=0.001,  # Optimized from analysis: reduced from 0.01 for better convergence
+        lr=0.01,  # Optimized from analysis: reduced from 0.01 for better convergence
         epochs=self.local_epochs,
         args_optimizer="sgd",  # Original paper settings
         weight_decay=1e-5,  # Original paper settings
@@ -165,7 +172,7 @@ class FedMoonClient(NumPyClient):
         net=self.net,
         train_loader=self.train_loader,
         epochs=self.local_epochs,
-        lr=0.001,
+        lr=0.01,
         device=self.device,
       )
 
@@ -181,20 +188,30 @@ class FedMoonClient(NumPyClient):
 
     return filtered_logits
 
+  # def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
+  #   """Evaluate model performance with performance tracking."""
+  #   # Load the trained model
+  #   loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
+  #   if loaded_model is not None:
+  #     self.net = loaded_model
+  #     print("[DEBUG] Model loaded successfully for evaluation")
+  #   else:
+  #     print("[Warning] No saved model state found, using initial model")
+
+  #   loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
+
+  #   return (
+  #     loss,
+  #     len(self.val_loader.dataset),  # type: ignore
+  #     {"accuracy": accuracy},
+  #   )
+
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
-    """Evaluate model performance with performance tracking."""
-    # Load the trained model
-    loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
-    if loaded_model is not None:
-      self.net = loaded_model
-      print("[DEBUG] Model loaded successfully for evaluation")
-    else:
-      print("[Warning] No saved model state found, using initial model")
+    """Evaluate model performance using server-provided parameters."""
+    # parametersがNoneまたは空でない場合、サーバーモデルのパラメータを適用
+    if parameters is not None and len(parameters) > 0:
+      print("[DEBUG] Applying server model parameters for evaluation")
+      set_weights(self.net, parameters)
 
-    loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
-
-    return (
-      loss,
-      len(self.val_loader.dataset),  # type: ignore
-      {"accuracy": accuracy},
-    )
+    loss, accuracy = CNNTask.test(self.net, self.val_loader, self.device)
+    return loss, len(self.val_loader.dataset), {"accuracy": accuracy}  # type: ignore
