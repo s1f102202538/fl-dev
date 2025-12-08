@@ -100,7 +100,7 @@ class FedKDParamsShare(Strategy):
     # Store results
     self.results: Dict = {}
 
-    # Communication cost tracking
+    # Communication cost tracking (round 1 parameter distribution excluded, round 2+ included)
     self.communication_costs: Dict[str, List[float]] = {
       "server_to_client_params_mb": [],
       "client_to_server_logits_mb": [],
@@ -200,16 +200,25 @@ class FedKDParamsShare(Strategy):
     ndarrays = [val.cpu().numpy() for _, val in self.server_model.state_dict().items()]
     parameters = ndarrays_to_parameters(ndarrays)
 
-    # Calculate parameter size (server -> client communication)
-    self.last_params_size_mb = calculate_communication_cost(parameters)["size_mb"]
-
-    print(f"[FedKD-ParamsShare] Round {server_round}: Sending model parameters to clients (size: {self.last_params_size_mb:.4f} MB)")
-
     fit_ins = FitIns(parameters, config)
 
     # Sample clients
     sample_size, min_num_clients = self.num_fit_clients(client_manager.num_available())
     clients = client_manager.sample(num_clients=sample_size, min_num_clients=min_num_clients)
+
+    # Calculate parameter size for round 2+ (round 1 is excluded from communication cost)
+    if server_round == 1:
+      # Round 1: Initial parameter distribution (not counted)
+      self.communication_costs["server_to_client_params_mb"].append(0.0)
+      print(f"[FedKD-ParamsShare] Round {server_round}: Sending initial model parameters to {len(clients)} clients (not counted in communication cost)")
+    else:
+      # Round 2+: Count parameter distribution
+      params_size_mb = calculate_communication_cost(parameters)["size_mb"]
+      total_params_size_mb = params_size_mb * len(clients)
+      self.communication_costs["server_to_client_params_mb"].append(total_params_size_mb)
+      print(
+        f"[FedKD-ParamsShare] Round {server_round}: Sending model parameters to {len(clients)} clients (size: {params_size_mb:.4f} MB per client, total: {total_params_size_mb:.4f} MB)"
+      )
 
     # Return client/config pairs
     return [(client, fit_ins) for client in clients]
@@ -230,10 +239,18 @@ class FedKDParamsShare(Strategy):
     client_logits_list = []
     client_weights = []
 
+    # Communication cost measurement
+    total_logits_mb = 0.0
+
     for _, fit_res in results:
-      if "logits" in fit_res.metrics:
-        logits_base64 = str(fit_res.metrics["logits"])
-        logits = base64_to_batch_list(logits_base64)
+      # Measure logit size
+      if fit_res.metrics and "logits" in fit_res.metrics:
+        logits_data = str(fit_res.metrics["logits"])
+        logits_size_mb = calculate_data_size_mb(logits_data)
+        total_logits_mb += logits_size_mb
+
+        # Extract logits
+        logits = base64_to_batch_list(logits_data)
         client_logits_list.append(logits)
         client_weights.append(fit_res.num_examples)
 
@@ -242,24 +259,19 @@ class FedKDParamsShare(Strategy):
       return None, {}
 
     # Calculate communication costs
-    # Parameter size: from configure_fit (server -> client)
-    params_size_mb = getattr(self, "last_params_size_mb", 0.0)
+    self.communication_costs["client_to_server_logits_mb"].append(total_logits_mb)
 
-    # Logit size: calculate from received logits (client -> server)
-    logits_size_mb = sum(calculate_data_size_mb(str(fit_res.metrics.get("logits", ""))) for _, fit_res in results if "logits" in fit_res.metrics) / len(
-      client_logits_list
-    )
-    total_size_mb = params_size_mb + logits_size_mb
-
-    self.communication_costs["server_to_client_params_mb"].append(params_size_mb)
-    self.communication_costs["client_to_server_logits_mb"].append(logits_size_mb)
+    # Get server-to-client params size (0 for round 1, actual size for round 2+)
+    server_to_client_params_mb = self.communication_costs["server_to_client_params_mb"][-1] if self.communication_costs["server_to_client_params_mb"] else 0.0
+    total_size_mb = server_to_client_params_mb + total_logits_mb
     self.communication_costs["total_round_mb"].append(total_size_mb)
 
-    print(
-      f"[FedKD-ParamsShare] Round {server_round}: Server->Client params: {params_size_mb:.4f} MB, Client->Server logits: {logits_size_mb:.4f} MB, total: {total_size_mb:.4f} MB"
-    )
-
-    # Aggregate logits using weighted average
+    if server_round == 1:
+      print(f"[FedKD-ParamsShare] Round {server_round}: Client->Server logits: {total_logits_mb:.4f} MB (initial params excluded)")
+    else:
+      print(
+        f"[FedKD-ParamsShare] Round {server_round}: Server->Client params: {server_to_client_params_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_size_mb:.4f} MB"
+      )  # Aggregate logits using weighted average
     self.aggregated_logits = self._aggregate_logits(client_logits_list, client_weights)
     print(f"[FedKD-ParamsShare] Round {server_round}: Aggregated {len(self.aggregated_logits)} logit batches from {len(client_logits_list)} clients")
 
@@ -284,8 +296,8 @@ class FedKDParamsShare(Strategy):
       metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
 
     # Add communication cost metrics
-    metrics_aggregated["comm_cost_server_to_client_params_mb"] = params_size_mb
-    metrics_aggregated["comm_cost_client_to_server_logits_mb"] = logits_size_mb
+    metrics_aggregated["comm_cost_server_to_client_params_mb"] = server_to_client_params_mb
+    metrics_aggregated["comm_cost_client_to_server_logits_mb"] = total_logits_mb
     metrics_aggregated["comm_cost_total_round_mb"] = total_size_mb
     metrics_aggregated["comm_cost_cumulative_mb"] = sum(self.communication_costs["total_round_mb"])
 

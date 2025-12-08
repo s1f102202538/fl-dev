@@ -327,15 +327,8 @@ class FedKDAvg(Strategy):
     """
 
     # 評価用の設定を作成
-    config = {}
+    config = {"current_round": server_round}
 
-    # 現在のラウンド情報を追加
-    config["current_round"] = server_round
-
-    # 前回のラウンドで集約されたロジットがある場合のみ追加
-    if self.avg_logits:
-      config["avg_logits"] = batch_list_to_base64(self.avg_logits)
-    # 初回ラウンドではロジットが存在しないため、avg_logitsキーを含めない
     evaluate_ins = EvaluateIns(parameters, config)
 
     # 評価に参加するクライアントをサンプリング

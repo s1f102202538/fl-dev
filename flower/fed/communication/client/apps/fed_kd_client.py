@@ -51,20 +51,6 @@ class FedKdClient(NumPyClient):
     """FedKD client training with knowledge distillation and logit sharing."""
     # Optimized temperature parameter from analysis
     temperature = float(config.get("temperature", 3.0))  # Increased from 3.0 for better distillation
-    current_round = int(config.get("current_round", 1))
-
-    # ラウンド2以降：前回の蒸留済みグローバルモデルを評価
-    global_model_metrics = {}
-    if current_round > 1:
-      loaded_global_model = load_model_from_state(self.client_state, self.net, self.global_model_name)
-      if loaded_global_model is not None:
-        print(f"[INFO] Evaluating global model from round {current_round - 1}")
-        global_loss, global_accuracy = CNNTask.test(loaded_global_model, self.val_loader, device=self.device)
-        global_model_metrics = {
-          "global_model_loss": global_loss,
-          "global_model_accuracy": global_accuracy,
-        }
-        print(f"[INFO] Global model accuracy: {global_accuracy:.2f}%")
 
     # Perform knowledge distillation if server logits are available
     if "avg_logits" in config and config["avg_logits"] is not None:
@@ -82,17 +68,13 @@ class FedKdClient(NumPyClient):
 
     print(f"Client training loss: {train_loss:.4f}")
 
-    # Merge metrics
-    metrics = {
-      "train_loss": train_loss,
-      "logits": batch_list_to_base64(filtered_logits),
-    }
-    metrics.update(global_model_metrics)
-
     return (
       [],  # Empty list for logit-only sharing (no parameter aggregation)
       len(self.train_loader.dataset),  # type: ignore
-      metrics,
+      {
+        "train_loss": train_loss,
+        "logits": batch_list_to_base64(filtered_logits),
+      },
     )
 
   def _perform_knowledge_distillation(self, avg_logits: str, temperature: float) -> None:
@@ -158,18 +140,23 @@ class FedKdClient(NumPyClient):
 
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
     """Evaluate model performance on validation data."""
-    # Load the trained model
-    loaded_model = load_model_from_state(self.client_state, self.net, self.global_model_name)
-    if loaded_model is not None:
-      self.net = loaded_model
-      print("[DEBUG] Model loaded successfully for evaluation")
+    current_round = int(config.get("current_round", 1))
+
+    # 蒸留済みグローバルモデルを評価
+    loaded_global_model = load_model_from_state(self.client_state, self.net, self.global_model_name)
+    if loaded_global_model is not None:
+      print(f"[INFO] Evaluating global model from round {current_round - 1}")
+      loss, accuracy = CNNTask.test(loaded_global_model, self.val_loader, device=self.device)
+      print(f"[INFO] Global model accuracy: {accuracy:.2f}%")
+      return (
+        loss,
+        len(self.val_loader.dataset),  # type: ignore
+        {"accuracy": accuracy},
+      )
     else:
-      print("[WARNING] No saved model state found, using initial model")
-
-    loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
-
-    return (
-      loss,
-      len(self.val_loader.dataset),  # type: ignore
-      {"accuracy": accuracy},
-    )
+      print("[WARNING] No saved global model found")
+      return (
+        0.0,
+        len(self.val_loader.dataset),  # type: ignore
+        {"accuracy": 0.0},
+      )

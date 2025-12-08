@@ -181,7 +181,7 @@ class CNNTask:
     data_loader: DataLoader,
     device: torch.device,
     tau: float = 0.99,
-    alpha: float = 1.1,
+    alpha: float = 1.05,
   ) -> list[torch.Tensor]:
     net.to(device)
     net.eval()

@@ -14,7 +14,6 @@ from fed.util.model_util import (
   filter_and_calibrate_logits,
   load_model_from_state,
   save_model_to_state,
-  set_weights,
 )
 from flwr.client import NumPyClient
 from flwr.common import RecordDict
@@ -52,8 +51,8 @@ class FedMoonClient(NumPyClient):
 
     # Initialize Moon contrastive learning with optimized parameters
     self.moon_learner = MoonContrastiveLearning(
-      mu=1.0,  # 1.0 の方がよい可能性
-      temperature=0.5,  # Optimized from analysis: best performance at temp=0.5
+      mu=3.0,
+      temperature=0.3,
       device=self.device,
     )
 
@@ -129,11 +128,11 @@ class FedMoonClient(NumPyClient):
 
     # Train virtual global model with optimized FedKD parameters
     self.virtual_global_model = distillation.train_knowledge_distillation(
-      epochs=5,  # Increased from 3 for better distillation
+      epochs=20,  # Increased from 3 for better distillation
       learning_rate=0.001,  # Reduced from 0.01 for more stable training
       T=temperature,
-      alpha=0.3,  # FedKD paper: KL distillation loss weight
-      beta=0.7,  # FedKD paper: CE loss weight
+      alpha=0.7,  # FedKD paper: KL distillation loss weight
+      beta=0.3,  # FedKD paper: CE loss weight
       device=self.device,
     )
 
@@ -164,7 +163,6 @@ class FedMoonClient(NumPyClient):
         lr=0.01,  # Optimized from analysis: reduced from 0.01 for better convergence
         epochs=self.local_epochs,
         args_optimizer="sgd",  # Original paper settings
-        weight_decay=1e-5,  # Original paper settings
       )
     else:
       print("[INFO] No previous model available, performing normal training")
@@ -188,30 +186,25 @@ class FedMoonClient(NumPyClient):
 
     return filtered_logits
 
-  # def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
-  #   """Evaluate model performance with performance tracking."""
-  #   # Load the trained model
-  #   loaded_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
-  #   if loaded_model is not None:
-  #     self.net = loaded_model
-  #     print("[DEBUG] Model loaded successfully for evaluation")
-  #   else:
-  #     print("[Warning] No saved model state found, using initial model")
-
-  #   loss, accuracy = CNNTask.test(self.net, self.val_loader, device=self.device)
-
-  #   return (
-  #     loss,
-  #     len(self.val_loader.dataset),  # type: ignore
-  #     {"accuracy": accuracy},
-  #   )
-
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
-    """Evaluate model performance using server-provided parameters."""
-    # parametersがNoneまたは空でない場合、サーバーモデルのパラメータを適用
-    if parameters is not None and len(parameters) > 0:
-      print("[DEBUG] Applying server model parameters for evaluation")
-      set_weights(self.net, parameters)
+    """Evaluate model performance with performance tracking."""
+    current_round = int(config.get("current_round", 1))
 
-    loss, accuracy = CNNTask.test(self.net, self.val_loader, self.device)
-    return loss, len(self.val_loader.dataset), {"accuracy": accuracy}  # type: ignore
+    # 蒸留済みグローバルモデルを評価
+    loaded_global_model = load_model_from_state(self.client_state, self.net, self.global_model_name)
+    if loaded_global_model is not None:
+      print(f"[INFO] Evaluating global model from round {current_round - 1}")
+      loss, accuracy = CNNTask.test(loaded_global_model, self.val_loader, device=self.device)
+      print(f"[INFO] Global model accuracy: {accuracy:.2f}%")
+      return (
+        loss,
+        len(self.val_loader.dataset),  # type: ignore
+        {"accuracy": accuracy},
+      )
+    else:
+      print("[WARNING] No saved global model found")
+      return (
+        0.0,
+        len(self.val_loader.dataset),  # type: ignore
+        {"accuracy": 0.0},
+      )
