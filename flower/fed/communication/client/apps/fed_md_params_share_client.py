@@ -5,15 +5,15 @@ from typing import Dict, Tuple
 import torch
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
-from fed.util.model_util import batch_list_to_base64, get_weights, set_weights
+from fed.util.model_util import batch_list_to_base64, set_weights
 from flwr.client import NumPyClient
 from flwr.common import RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
 
-class FedKdParamsShareClient(NumPyClient):
-  """FedKD client that receives parameters and returns logits.
+class FedMdParamsShareClient(NumPyClient):
+  """FedMD client that receives parameters and returns logits.
 
   This client:
   1. Receives model parameters from server

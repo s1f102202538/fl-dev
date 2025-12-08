@@ -8,6 +8,7 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, override
 import torch
 import wandb
 from fed.algorithms.distillation import Distillation
+from fed.algorithms.loca_based_distillation import LoCaBasedDistillation
 from fed.models.base_model import BaseModel
 from fed.util.communication_cost import calculate_communication_cost, calculate_data_size_mb
 from fed.util.model_util import base64_to_batch_list, create_run_dir
@@ -32,7 +33,19 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 
-class FedMoonParamsShare(Strategy):
+class FedMdParamsShare(Strategy):
+  """Federated Learning strategy with logit aggregation and parameter distribution.
+
+  This strategy combines:
+  1. Server-side: Send model parameters to clients
+  2. Client-side: Train locally and generate logits from trained model
+  3. Client-side: Send logits back to server
+  4. Server-side: Aggregate logits and perform knowledge distillation on server model
+
+  Flow:
+  - Round 1+: Server sends parameters → Clients train → Clients return logits → Server aggregates logits and distills
+  """
+
   def __init__(
     self,
     *,
@@ -87,7 +100,7 @@ class FedMoonParamsShare(Strategy):
     # Store results
     self.results: Dict = {}
 
-    # Communication cost tracking
+    # Communication cost tracking (round 1 parameter distribution excluded, round 2+ included)
     self.communication_costs: Dict[str, List[float]] = {
       "server_to_client_params_mb": [],
       "client_to_server_logits_mb": [],
@@ -97,7 +110,7 @@ class FedMoonParamsShare(Strategy):
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
     wandb_project_name = os.getenv("WANDB_PROJECT_NAME", "federated-learning-default")
-    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedMoonParamsShare")
+    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedKDParamsShare")
     print(f"[W&B] Initialized project: {wandb_project_name}")
 
   def _aggregate_logits(self, client_logits_list: List[List[Tensor]], weights: List[int]) -> List[Tensor]:
@@ -130,14 +143,14 @@ class FedMoonParamsShare(Strategy):
     )
 
     self.server_model = distillation.train_knowledge_distillation(
-      epochs=5,
+      epochs=20,
       learning_rate=0.001,
       T=self.kd_temperature,
-      alpha=0.3,
-      beta=0.7,
+      alpha=0.7,
+      beta=0.3,
       device=self.device,
     )
-    print(f"[FedMoon-ParamsShare] Round {server_round}: Server model distillation completed")
+    print(f"[FedKD-ParamsShare] Round {server_round}: Server model distillation completed")
 
   def store_results_and_log(self, server_round: int, tag: str, results_dict: Dict) -> None:
     """A helper method that stores results and logs them to W&B if enabled."""
@@ -157,7 +170,7 @@ class FedMoonParamsShare(Strategy):
   @override
   def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
     """Initialize global model parameters to send to clients."""
-    print("[FedMoon-ParamsShare] Initializing server model parameters")
+    print("[FedKD-ParamsShare] Initializing server model parameters")
 
     # Return initial model parameters
     initial_parameters = self.initial_parameters
@@ -169,7 +182,7 @@ class FedMoonParamsShare(Strategy):
         first_layer_mean = float(initial_ndarrays[0].mean())
         first_layer_std = float(initial_ndarrays[0].std())
         first_layer_sum = float(initial_ndarrays[0].sum())
-        print(f"[FedMoon-ParamsShare] INITIAL parameters - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}")
+        print(f"[FedKD-ParamsShare] INITIAL parameters - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}")
 
     self.initial_parameters = None
     return initial_parameters
@@ -187,13 +200,25 @@ class FedMoonParamsShare(Strategy):
     ndarrays = [val.cpu().numpy() for _, val in self.server_model.state_dict().items()]
     parameters = ndarrays_to_parameters(ndarrays)
 
-    print(f"[FedMoon-ParamsShare] Round {server_round}: Sending model parameters to clients")
-
     fit_ins = FitIns(parameters, config)
 
     # Sample clients
     sample_size, min_num_clients = self.num_fit_clients(client_manager.num_available())
     clients = client_manager.sample(num_clients=sample_size, min_num_clients=min_num_clients)
+
+    # Calculate parameter size for round 2+ (round 1 is excluded from communication cost)
+    if server_round == 1:
+      # Round 1: Initial parameter distribution (not counted)
+      self.communication_costs["server_to_client_params_mb"].append(0.0)
+      print(f"[FedKD-ParamsShare] Round {server_round}: Sending initial model parameters to {len(clients)} clients (not counted in communication cost)")
+    else:
+      # Round 2+: Count parameter distribution
+      params_size_mb = calculate_communication_cost(parameters)["size_mb"]
+      total_params_size_mb = params_size_mb * len(clients)
+      self.communication_costs["server_to_client_params_mb"].append(total_params_size_mb)
+      print(
+        f"[FedKD-ParamsShare] Round {server_round}: Sending model parameters to {len(clients)} clients (size: {params_size_mb:.4f} MB per client, total: {total_params_size_mb:.4f} MB)"
+      )
 
     # Return client/config pairs
     return [(client, fit_ins) for client in clients]
@@ -214,35 +239,41 @@ class FedMoonParamsShare(Strategy):
     client_logits_list = []
     client_weights = []
 
+    # Communication cost measurement
+    total_logits_mb = 0.0
+
     for _, fit_res in results:
-      if "logits" in fit_res.metrics:
-        logits_base64 = str(fit_res.metrics["logits"])
-        logits = base64_to_batch_list(logits_base64)
+      # Measure logit size
+      if fit_res.metrics and "logits" in fit_res.metrics:
+        logits_data = str(fit_res.metrics["logits"])
+        logits_size_mb = calculate_data_size_mb(logits_data)
+        total_logits_mb += logits_size_mb
+
+        # Extract logits
+        logits = base64_to_batch_list(logits_data)
         client_logits_list.append(logits)
         client_weights.append(fit_res.num_examples)
 
     if not client_logits_list:
-      print(f"[FedMoon-ParamsShare] Round {server_round}: No logits received from clients")
+      print(f"[FedKD-ParamsShare] Round {server_round}: No logits received from clients")
       return None, {}
 
     # Calculate communication costs
-    params_size_mb = calculate_communication_cost(ndarrays_to_parameters([val.cpu().numpy() for _, val in self.server_model.state_dict().items()]))["size_mb"]
-    logits_size_mb = sum(calculate_data_size_mb(str(fit_res.metrics.get("logits", ""))) for _, fit_res in results if "logits" in fit_res.metrics) / len(
-      client_logits_list
-    )
-    total_size_mb = params_size_mb + logits_size_mb
+    self.communication_costs["client_to_server_logits_mb"].append(total_logits_mb)
 
-    self.communication_costs["server_to_client_params_mb"].append(params_size_mb)
-    self.communication_costs["client_to_server_logits_mb"].append(logits_size_mb)
+    # Get server-to-client params size (0 for round 1, actual size for round 2+)
+    server_to_client_params_mb = self.communication_costs["server_to_client_params_mb"][-1] if self.communication_costs["server_to_client_params_mb"] else 0.0
+    total_size_mb = server_to_client_params_mb + total_logits_mb
     self.communication_costs["total_round_mb"].append(total_size_mb)
 
-    print(
-      f"[FedMoon-ParamsShare] Round {server_round}: Server->Client params: {params_size_mb:.4f} MB, Client->Server logits: {logits_size_mb:.4f} MB, total: {total_size_mb:.4f} MB"
-    )
-
-    # Aggregate logits using weighted average
+    if server_round == 1:
+      print(f"[FedKD-ParamsShare] Round {server_round}: Client->Server logits: {total_logits_mb:.4f} MB (initial params excluded)")
+    else:
+      print(
+        f"[FedKD-ParamsShare] Round {server_round}: Server->Client params: {server_to_client_params_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_size_mb:.4f} MB"
+      )  # Aggregate logits using weighted average
     self.aggregated_logits = self._aggregate_logits(client_logits_list, client_weights)
-    print(f"[FedMoon-ParamsShare] Round {server_round}: Aggregated {len(self.aggregated_logits)} logit batches from {len(client_logits_list)} clients")
+    print(f"[FedKD-ParamsShare] Round {server_round}: Aggregated {len(self.aggregated_logits)} logit batches from {len(client_logits_list)} clients")
 
     # Perform knowledge distillation on server model using aggregated logits
     self._distill_server_model(server_round)
@@ -255,7 +286,7 @@ class FedMoonParamsShare(Strategy):
     first_layer_std = float(updated_ndarrays[0].std())
     first_layer_sum = float(updated_ndarrays[0].sum())
     print(
-      f"[FedMoon-ParamsShare] Round {server_round}: Server model after distillation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
+      f"[FedKD-ParamsShare] Round {server_round}: Server model after distillation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
     )
 
     # Aggregate custom metrics if aggregation function is provided
@@ -265,8 +296,8 @@ class FedMoonParamsShare(Strategy):
       metrics_aggregated = self.fit_metrics_aggregation_fn(fit_metrics)
 
     # Add communication cost metrics
-    metrics_aggregated["comm_cost_server_to_client_params_mb"] = params_size_mb
-    metrics_aggregated["comm_cost_client_to_server_logits_mb"] = logits_size_mb
+    metrics_aggregated["comm_cost_server_to_client_params_mb"] = server_to_client_params_mb
+    metrics_aggregated["comm_cost_client_to_server_logits_mb"] = total_logits_mb
     metrics_aggregated["comm_cost_total_round_mb"] = total_size_mb
     metrics_aggregated["comm_cost_cumulative_mb"] = sum(self.communication_costs["total_round_mb"])
 
@@ -292,7 +323,7 @@ class FedMoonParamsShare(Strategy):
     first_layer_std = float(ndarrays[0].std())
     first_layer_sum = float(ndarrays[0].sum())
     print(
-      f"[FedMoon-ParamsShare] Round {server_round}: Sending server model parameters for evaluation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
+      f"[FedKD-ParamsShare] Round {server_round}: Sending server model parameters for evaluation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
     )
 
     evaluate_ins = EvaluateIns(parameters, config)
@@ -327,7 +358,7 @@ class FedMoonParamsShare(Strategy):
     # Log accuracy information
     if "accuracy" in metrics_aggregated:
       accuracy = metrics_aggregated["accuracy"]
-      print(f"[FedMoon-ParamsShare] Round {server_round}: Federated evaluation accuracy: {accuracy:.4f}")
+      print(f"[FedKD-ParamsShare] Round {server_round}: Federated evaluation accuracy: {accuracy:.4f}")
 
     # Store and log results
     self.store_results_and_log(server_round, "federated_evaluate", {"federated_evaluate_loss": loss_aggregated, **metrics_aggregated})

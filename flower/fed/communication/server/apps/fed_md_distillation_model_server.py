@@ -4,10 +4,10 @@ from flwr.server import ServerAppComponents, ServerConfig
 from torch import device
 from torch.utils.data import DataLoader
 
-from ..strategy.fed_kd_distillation_model import FedKDDistillationModel
+from ..strategy.fed_md_distillation_model import FedMdDistillationModel
 
 
-class FedKDDistillationModelServer:
+class FedMdDistillationModelServer:
   @staticmethod
   def create_server(
     server_model: BaseModel,

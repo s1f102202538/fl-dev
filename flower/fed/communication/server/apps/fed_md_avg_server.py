@@ -1,10 +1,10 @@
 from fed.util.model_util import weighted_average
 from flwr.server import ServerAppComponents, ServerConfig
 
-from ..strategy.fed_kd_avg import FedKDAvg
+from ..strategy.fed_md_avg import FedMdAvg
 
 
-class FedKDAvgServer:
+class FedMdAvgServer:
   """Federated Knowledge Distillation Server with Simple Average Aggregation
 
   This server implements FedKD strategy using simple average aggregation of client logits.
@@ -12,7 +12,7 @@ class FedKDAvgServer:
 
   @staticmethod
   def create_server(use_wandb: bool, run_config, num_rounds: int) -> ServerAppComponents:
-    strategy = FedKDAvg(
+    strategy = FedMdAvg(
       run_config=run_config,
       use_wandb=use_wandb,
       fraction_fit=1.0,

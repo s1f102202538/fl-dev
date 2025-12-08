@@ -7,10 +7,10 @@ from flwr.server import ServerAppComponents, ServerConfig
 from torch import device
 from torch.utils.data import DataLoader
 
-from ..strategy.fed_kd_params_share_csd import FedKDParamsShareCsd
+from ..strategy.fed_md_params_share_csd import FedMdParamsShareCsd
 
 
-class FedKdParamsShareCsdServer:
+class FedMdParamsShareCsdServer:
   """Server for FedKD with Parameter Sharing and CSD.
 
   This server implements:
@@ -57,7 +57,7 @@ class FedKdParamsShareCsdServer:
     initial_parameters = ndarrays_to_parameters(get_weights(server_model))
 
     # Create strategy with logit aggregation, class prototype creation, and server-side distillation
-    strategy = FedKDParamsShareCsd(
+    strategy = FedMdParamsShareCsd(
       server_model=server_model,
       public_data_loader=public_data_loader,
       run_config=run_config,

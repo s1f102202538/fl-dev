@@ -8,13 +8,12 @@ from flwr.server import ServerApp, ServerAppComponents
 from torch import device
 
 from .apps.fed_avg_server import FedAvgServer
-from .apps.fed_kd_avg_server import FedKDAvgServer
-from .apps.fed_kd_distillation_model_server import FedKDDistillationModelServer
-from .apps.fed_kd_params_share_csd_server import FedKdParamsShareCsdServer
-from .apps.fed_kd_params_share_server import FedKDParamsShareServer
-from .apps.fed_kd_public_distillation_server import FedKDPublicDistillationServer
-from .apps.fed_kd_weighted_avg_server import FedKDWeightedAvgServer
-from .apps.fed_moon_params_share_server import FedMoonParamsShareServer
+from .apps.fed_md_avg_server import FedMdAvgServer
+from .apps.fed_md_distillation_model_server import FedMdDistillationModelServer
+from .apps.fed_md_params_share_csd_server import FedMdParamsShareCsdServer
+from .apps.fed_md_params_share_server import FedMdParamsShareServer
+from .apps.fed_md_public_distillation_server import FedMdPublicDistillationServer
+from .apps.fed_md_weighted_avg_server import FedMdWeightedAvgServer
 
 
 def server_fn(context: Context) -> ServerAppComponents:
@@ -39,15 +38,15 @@ def server_fn(context: Context) -> ServerAppComponents:
     net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     return FedAvgServer.create_server(net, use_wandb, context.run_config, server_device, num_rounds, testloader)
   elif server_name == "fed-kd-avg-server":
-    return FedKDAvgServer.create_server(use_wandb, context.run_config, num_rounds)
+    return FedMdAvgServer.create_server(use_wandb, context.run_config, num_rounds)
   elif server_name == "fed-kd-weighted-avg-server":
-    return FedKDWeightedAvgServer.create_server(use_wandb, context.run_config, num_rounds)
+    return FedMdWeightedAvgServer.create_server(use_wandb, context.run_config, num_rounds)
   elif server_name == "fed-kd-distillation-model-server":
     # Create server-side model and public data loader here
     server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     public_data_loader = load_public_data(data_loader_config)
 
-    return FedKDDistillationModelServer.create_server(
+    return FedMdDistillationModelServer.create_server(
       server_model=server_model,
       public_data_loader=public_data_loader,
       server_device=server_device,
@@ -60,7 +59,7 @@ def server_fn(context: Context) -> ServerAppComponents:
     server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     public_data_loader = load_public_data(data_loader_config)
 
-    return FedKDPublicDistillationServer.create_server(
+    return FedMdPublicDistillationServer.create_server(
       server_model=server_model,
       public_data_loader=public_data_loader,
       server_device=server_device,
@@ -73,20 +72,7 @@ def server_fn(context: Context) -> ServerAppComponents:
     server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     public_data_loader = load_public_data(data_loader_config)
 
-    return FedKDParamsShareServer.create_server(
-      server_model=server_model,
-      public_data_loader=public_data_loader,
-      server_device=server_device,
-      use_wandb=use_wandb,
-      run_config=context.run_config,
-      num_rounds=num_rounds,
-    )
-  elif server_name == "fed-moon-params-share-server":
-    # Create server-side model and public data loader for MOON parameter aggregation and logit distillation
-    server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
-    public_data_loader = load_public_data(data_loader_config)
-
-    return FedMoonParamsShareServer.create_server(
+    return FedMdParamsShareServer.create_server(
       server_model=server_model,
       public_data_loader=public_data_loader,
       server_device=server_device,
@@ -98,7 +84,7 @@ def server_fn(context: Context) -> ServerAppComponents:
     server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     public_data_loader = load_public_data(data_loader_config)
 
-    return FedKdParamsShareCsdServer.create_server(
+    return FedMdParamsShareCsdServer.create_server(
       server_model=server_model,
       public_data_loader=public_data_loader,
       server_device=server_device,

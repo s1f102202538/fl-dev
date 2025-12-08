@@ -13,7 +13,6 @@ from fed.util.model_util import (
   filter_and_calibrate_logits,
   load_model_from_state,
   save_model_to_state,
-  set_weights,
 )
 from flwr.client import NumPyClient
 from flwr.common import RecordDict
@@ -21,8 +20,8 @@ from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
 
-class FedKdClient(NumPyClient):
-  """FedKD client with knowledge distillation and logit sharing capabilities."""
+class FedMdClient(NumPyClient):
+  """FedMD client with knowledge distillation and logit sharing capabilities."""
 
   def __init__(
     self,

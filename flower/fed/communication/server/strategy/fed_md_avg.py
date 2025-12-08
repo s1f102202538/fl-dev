@@ -17,8 +17,8 @@ from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor
 
 
-class FedKDAvg(Strategy):
-  """Federated Knowledge Distillation with Simple Average Logit Aggregation strategy.
+class FedMdAvg(Strategy):
+  """Federated Model Distillation with Simple Average Logit Aggregation strategy.
 
   This strategy performs knowledge distillation using simple average aggregation of client logits.
   Key features:
@@ -304,7 +304,7 @@ class FedKDAvg(Strategy):
     return None, aggregated_metrics
 
   @override
-  def configure_evaluate(self, server_round: int, parameters: Parameters, client_manager: ClientManager) -> List[Tuple[ClientProxy, EvaluateIns]]:
+  def configure_evaluate(self, server_round: Scalar, parameters: Parameters, client_manager: ClientManager) -> List[Tuple[ClientProxy, EvaluateIns]]:
     """Configure the next round of evaluation.
 
     Parameters

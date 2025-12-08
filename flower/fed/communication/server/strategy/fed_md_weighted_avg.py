@@ -1,4 +1,3 @@
-import copy
 import json
 import os
 from logging import WARNING
@@ -6,12 +5,9 @@ from typing import Callable, Dict, List, Optional, Tuple, Union, override
 
 import torch
 import wandb
-from fed.algorithms.distillation import Distillation
-from fed.models.base_model import BaseModel
-from fed.task.cnn_task import CNNTask
 from fed.util.communication_cost import calculate_data_size_mb
 from fed.util.model_util import base64_to_batch_list, batch_list_to_base64, create_run_dir
-from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, Parameters, Scalar, ndarrays_to_parameters
+from flwr.common import EvaluateIns, EvaluateRes, FitIns, FitRes, MetricsAggregationFn, Parameters, Scalar
 from flwr.common.logger import log
 from flwr.common.typing import UserConfig
 from flwr.server.client_manager import ClientManager
@@ -19,29 +15,14 @@ from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import Strategy
 from flwr.server.strategy.aggregate import weighted_loss_avg
 from torch import Tensor
-from torch.utils.data import DataLoader
 
 
-class FedKDDistillationModel(Strategy):
-  """Federated Knowledge Distillation strategy with server-side model training.
-
-  This strategy performs knowledge distillation by:
-  1. Collecting logits from all clients without filtering
-  2. Aggregating client logits using weighted averaging based on client data sizes
-  3. Training server-side model using the aggregated logits via knowledge distillation
-  4. Generating new logits from the trained server model using public data
-  5. Broadcasting the server-generated logits to clients for further distillation
-
-  Key approach: Client logits are first aggregated through weighted averaging,
-  then the server model is trained once with the aggregated knowledge,
-  providing efficient server-side learning while preserving client knowledge diversity.
-  """
+class FedMdWeightedAvg(Strategy):
+  """Federated Model Distillation (FedMD) strategy."""
 
   def __init__(
     self,
     *,
-    server_model: BaseModel,
-    public_data_loader: DataLoader,
     fraction_fit: float = 1.0,
     fraction_evaluate: float = 1.0,
     min_fit_clients: int = 5,
@@ -55,9 +36,8 @@ class FedKDDistillationModel(Strategy):
     evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
     run_config: UserConfig,
     use_wandb: bool = False,
-    kd_temperature: float = 5.0,  # 知識蒸留用温度
-    server_training_epochs: int = 5,  # サーバーモデル訓練エポック数
-    server_learning_rate: float = 0.01,  # サーバーモデル学習率
+    kd_temperature: float = 3.0,
+    max_history_rounds: int = 3,
   ) -> None:
     self.fraction_fit = fraction_fit
     self.fraction_evaluate = fraction_evaluate
@@ -70,23 +50,14 @@ class FedKDDistillationModel(Strategy):
     self.initial_parameters = initial_parameters
     self.fit_metrics_aggregation_fn = fit_metrics_aggregation_fn
     self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
+    self.avg_logits: List[Tensor] = []
 
-    # Server-side model and training configuration
-    self.server_model = server_model
-    self.public_data_loader = public_data_loader
-    self.server_training_epochs = server_training_epochs
-    self.server_learning_rate = server_learning_rate
-    self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    self.server_model.to(self.device)
+    self.max_history_rounds = max_history_rounds
 
-    # Server-generated logits for distribution to clients
-    self.server_generated_logits: List[Tensor] = []
-
-    # Server model state management for persistence across rounds
-    self.saved_server_model_state: Optional[Dict] = None
-
-    # Knowledge distillation temperature
+    # ロジット履歴とメトリクス
+    self.logit_history: List[List[Tensor]] = []
     self.kd_temperature = kd_temperature
+    self.round_metrics = []
 
     self.save_path, self.run_dir = create_run_dir(run_config)
     self.use_wandb = use_wandb
@@ -94,6 +65,9 @@ class FedKDDistillationModel(Strategy):
     # Initialise W&B if set
     if use_wandb:
       self._init_wandb_project()
+
+    # Keep track of best acc
+    self.best_acc_so_far = 0.0
 
     # A dictionary to store results as they come
     self.results: Dict = {}
@@ -134,141 +108,92 @@ class FedKDDistillationModel(Strategy):
       # Log metrics to W&B
       wandb.log(results_dict, step=server_round)
 
-  def _aggregate_client_logits(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
-    """Aggregate client logits using simple averaging.
-
-    Args:
-        logits_batch_lists: List of logit batch lists from each client
-        client_weights: Weights for each client (ignored, kept for compatibility)
-
-    Returns:
-        List of aggregated logit batches
-    """
+  def _weighted_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
+    """重み付きロジット集約"""
     if not logits_batch_lists:
       return []
 
-    print("[FedKD-Server] Using simple averaging for logit aggregation")
+    # 全クライアントで共通するバッチ数を決定
+    min_batches = min(len(batches) for batches in logits_batch_lists)
+    max_batches = max(len(batches) for batches in logits_batch_lists)
 
-    # Get the number of batches (assuming all clients have the same number of batches)
-    num_batches = len(logits_batch_lists[0])
+    if min_batches != max_batches:
+      print(f"[FedKD] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
 
-    # Check that all clients have the same number of batches
-    for i, client_logits in enumerate(logits_batch_lists):
-      if len(client_logits) != num_batches:
-        print(f"[FedKD-Server] WARNING: Client {i} has {len(client_logits)} batches, expected {num_batches}")
+    # 重みを正規化
+    total_weight = sum(client_weights)
+    normalized_weights = [w / total_weight for w in client_weights]
 
-    aggregated_logits = []
+    aggregated_batches = []
 
-    # Aggregate each batch position across all clients using simple averaging
-    for batch_idx in range(num_batches):
-      # Collect logits from all clients for this batch position
-      batch_logits_list = []
+    for batch_idx in range(min_batches):
+      batch_logits = []
+      batch_weights = []
 
-      for client_idx, client_logits in enumerate(logits_batch_lists):
-        if batch_idx < len(client_logits):  # Safety check
-          batch_logits_list.append(client_logits[batch_idx])
+      for client_idx, client_batches in enumerate(logits_batch_lists):
+        if batch_idx < len(client_batches):
+          logits = client_batches[batch_idx]
 
-      if batch_logits_list:
-        # Simple arithmetic mean of logits for this batch
-        stacked_logits = torch.stack(batch_logits_list)
-        aggregated_batch = torch.mean(stacked_logits, dim=0)
-        aggregated_logits.append(aggregated_batch)
+          batch_logits.append(logits)
+          batch_weights.append(normalized_weights[client_idx])
 
-    print(f"[FedKD-Server] Aggregated {len(aggregated_logits)} batches using simple averaging")
-    return aggregated_logits
+      if batch_logits:
+        # 重み付き平均を計算
+        if len(batch_weights) > 1:
+          # 重みを再正規化
+          total_batch_weight = sum(batch_weights)
+          batch_weights = [w / total_batch_weight for w in batch_weights]
 
-  def _train_server_model_with_aggregated_logits(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float], server_round: int) -> None:
-    """Train server model using aggregated client logits via knowledge distillation.
+          # 重み付き集約（torch.stackを使用）
+          stacked_logits = torch.stack(batch_logits)
+          weight_tensor = torch.tensor(batch_weights, device=stacked_logits.device).view(-1, 1, 1)
+          weighted_logits = (stacked_logits * weight_tensor).sum(dim=0)
+        else:
+          weighted_logits = batch_logits[0]
 
-    Args:
-        logits_batch_lists: List of logit batch lists from each client
-        client_weights: Weights for each client
-        server_round: Current federated learning round
-    """
-    if not logits_batch_lists:
-      print(f"[FedKD-Server] Round {server_round}: No client logits available for server training")
-      return
+        aggregated_batches.append(weighted_logits)
 
-    total_clients = len(logits_batch_lists)
-    print(f"[FedKD-Server] Round {server_round}: Aggregating logits from {total_clients} clients for server training")
+    print(f"[FedKD] Successfully aggregated {len(aggregated_batches)} batches without quality filtering")
+    return aggregated_batches
 
-    # Aggregate client logits using weighted averaging
-    aggregated_logits = self._aggregate_client_logits(logits_batch_lists, client_weights)
+  def _manage_logit_history(self, new_logits: List[Tensor]) -> None:
+    """ロジット履歴の管理"""
+    if new_logits:
+      self.logit_history.append(new_logits.copy())
 
-    if not aggregated_logits:
-      print(f"[FedKD-Server] Round {server_round}: No aggregated logits available for server training")
-      return
+      # 履歴サイズを制限
+      if len(self.logit_history) > self.max_history_rounds:
+        self.logit_history.pop(0)
 
-    print(f"[FedKD-Server] Round {server_round}: Training server model with {len(aggregated_logits)} aggregated logit batches")
+  def _get_enhanced_logits(self) -> List[Tensor]:
+    """履歴を考慮した強化ロジット"""
+    if not self.logit_history:
+      return self.avg_logits
 
-    # Create distillation trainer with aggregated logits
-    distillation = Distillation(
-      studentModel=self.server_model,
-      public_data=self.public_data_loader,
-      soft_targets=aggregated_logits,
-    )
+    if len(self.logit_history) == 1:
+      return self.avg_logits
 
-    # Train server model using knowledge distillation with aggregated logits
-    self.server_model = distillation.train_knowledge_distillation(
-      epochs=self.server_training_epochs,
-      learning_rate=self.server_learning_rate,
-      T=self.kd_temperature,
-      alpha=0.7,  # KL distillation loss weight
-      beta=0.3,  # CE loss weight
-      device=self.device,
-    )
+    # 過去のロジットとの移動平均を計算
+    current_logits = self.avg_logits
+    if len(self.logit_history) >= 2:
+      prev_logits = self.logit_history[-2]
 
-    print(
-      f"[FedKD-Server] Round {server_round}: Server model training completed with aggregated logits ({self.server_training_epochs} epochs, lr: {self.server_learning_rate:.4f})"
-    )
+      if len(current_logits) == len(prev_logits):
+        # 重み付き移動平均
+        alpha = 0.7  # 現在のロジットの重み
+        enhanced_logits = []
 
-  def _generate_server_logits(self, server_round: int) -> List[Tensor]:
-    """Generate logits using trained server model on public data.
+        for curr_batch, prev_batch in zip(current_logits, prev_logits):
+          if curr_batch.shape == prev_batch.shape:
+            enhanced_batch = alpha * curr_batch + (1 - alpha) * prev_batch
+            enhanced_logits.append(enhanced_batch)
+          else:
+            enhanced_logits.append(curr_batch)
 
-    Args:
-        server_round: Current federated learning round
+        print(f"[FedKD] Applied temporal smoothing with {len(enhanced_logits)} batches")
+        return enhanced_logits
 
-    Returns:
-        List of logits generated by server model
-    """
-    print(f"[FedKD-Server] Round {server_round}: Generating logits from trained server model")
-
-    # Generate logits using trained server model
-    server_logits = CNNTask.inference(self.server_model, self.public_data_loader, device=self.device)
-
-    print(f"[FedKD-Server] Round {server_round}: Generated {len(server_logits)} server logit batches")
-
-    return server_logits
-
-  def _save_server_model_state(self, server_round: int) -> None:
-    """Save current server model state for next round persistence.
-
-    Args:
-        server_round: Current federated learning round
-    """
-    print(f"[FedKD-Server] Round {server_round}: Saving server model state for next round")
-
-    # Deep copy of the current state to avoid reference issues
-    self.saved_server_model_state = copy.deepcopy(self.server_model.state_dict())
-
-    print(f"[FedKD-Server] Round {server_round}: Server model state saved successfully")
-
-  def _restore_server_model_state(self, server_round: int) -> None:
-    """Restore server model state from previous round if available.
-
-    Args:
-        server_round: Current federated learning round
-    """
-    if server_round == 1:
-      print(f"[FedKD-Server] Round {server_round}: First round - using initial server model state")
-      return
-
-    if self.saved_server_model_state is not None:
-      print(f"[FedKD-Server] Round {server_round}: Restoring server model state from previous round")
-      self.server_model.load_state_dict(self.saved_server_model_state)
-      print(f"[FedKD-Server] Round {server_round}: Server model state restored successfully")
-    else:
-      print(f"[FedKD-Server] Round {server_round}: WARNING - No saved state found, using current model state")
+    return current_logits
 
   @override
   def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
@@ -291,31 +216,29 @@ class FedKDDistillationModel(Strategy):
 
   @override
   def configure_fit(self, server_round: int, parameters: Parameters, client_manager: ClientManager) -> List[Tuple[ClientProxy, FitIns]]:
-    """Configure the next round of training with server-generated logits and communication cost measurement."""
+    """Configure the next round of training with enhanced logits and communication cost measurement."""
 
     config = {}
     # 現在のラウンド情報を追加
     config["current_round"] = server_round
 
+    # 強化されたロジットを取得（履歴を考慮）
+    enhanced_logits = self._get_enhanced_logits()
+
     # サーバーからクライアントへの通信コスト測定
     server_to_client_mb = 0.0
 
-    # サーバーで生成されたロジットがある場合のみ追加（前回のラウンドで訓練済み）
-    if self.server_generated_logits and server_round > 1:
-      logits_data = batch_list_to_base64(self.server_generated_logits)
+    # 前回のラウンドで集約されたロジットがある場合のみ追加
+    if enhanced_logits:
+      logits_data = batch_list_to_base64(enhanced_logits)
       config["avg_logits"] = logits_data
       # ロジットデータのサイズを測定
       server_to_client_mb = calculate_data_size_mb(logits_data)
       # 現在の温度をクライアントに送信
       config["temperature"] = self.kd_temperature
-      print(
-        f"[FedKD-Server] Round {server_round}: Sending {len(self.server_generated_logits)} server-generated logit batches to clients (temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)"
-      )
+      print(f"[FedKD] Sending {len(enhanced_logits)} enhanced logit batches to clients (temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)")
     else:
-      if server_round == 1:
-        print("[FedKD-Server] Round 1: No server logits available yet, clients will perform local training")
-      else:
-        print(f"[FedKD-Server] Round {server_round}: No server logits available for this round")
+      print("[FedKD] No logits available for this round")
 
     # 有効になっているクライアントの取得
     sample_size = int(self.fraction_fit * client_manager.num_available())
@@ -325,7 +248,7 @@ class FedKDDistillationModel(Strategy):
     total_server_to_client_mb = server_to_client_mb * len(clients)
     self.communication_costs["server_to_client_logits_mb"].append(total_server_to_client_mb)
 
-    print(f"[FedKD-Server] Round {server_round}: Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
+    print(f"[FedKD] Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
 
     fit_ins = FitIns(parameters, config)
     return [(client, fit_ins) for client in clients]
@@ -338,9 +261,6 @@ class FedKDDistillationModel(Strategy):
     failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]],
   ) -> Tuple[Optional[Parameters], dict[str, Scalar]]:
     """Aggregate training results with enhanced logit processing and communication cost measurement."""
-
-    # Restore server model state from previous round before training
-    self._restore_server_model_state(server_round)
 
     logits_batch_lists = []
     client_weights = []
@@ -359,23 +279,31 @@ class FedKDDistillationModel(Strategy):
         # バッチリスト形式でロジットを取得
         logits_batch_list = base64_to_batch_list(str(fit_res.metrics["logits"]))
 
-        logits_batch_lists.append(logits_batch_list)
-        # クライアントの重み（データサイズベース）
-        client_weights.append(float(fit_res.num_examples))
+        # NaN/Infを含むバッチは除外
+        filtered_batch_list = []
+        for batch in logits_batch_list:
+          if not torch.isnan(batch).any() and not torch.isinf(batch).any():
+            filtered_batch_list.append(batch)
+          else:
+            print("[FedKD] Skipped batch with NaN/Inf in logits from a client.")
+
+        if filtered_batch_list:
+          logits_batch_lists.append(filtered_batch_list)
+          # クライアントの重み（データサイズベース）
+          client_weights.append(float(fit_res.num_examples))
 
     if logits_batch_lists and client_weights:
-      print(f"[FedKD-Server] Round {server_round}: Processing logits from {len(logits_batch_lists)} clients for aggregated training")
+      print(f"[FedKD] Aggregating logits from {len(logits_batch_lists)} clients")
 
-      # Train server model with aggregated client logits
-      self._train_server_model_with_aggregated_logits(logits_batch_lists, client_weights, server_round)
+      # 重み付きロジット集約を実行
+      self.avg_logits = self._weighted_logit_aggregation(logits_batch_lists, client_weights)
 
-      # Generate server logits using trained model
-      self.server_generated_logits = self._generate_server_logits(server_round)
+      # ロジット履歴を管理
+      self._manage_logit_history(self.avg_logits)
 
-      # Save server model state after training for next round
-      self._save_server_model_state(server_round)
+      print(f"[FedKD] Successfully aggregated {len(self.avg_logits)} batches of logits")
     else:
-      print(f"[FedKD-Server] Round {server_round}: No valid logits received from clients")
+      print("[FedKD] No valid logits received from clients")
 
     # 通信コストを記録
     self.communication_costs["client_to_server_logits_mb"].append(total_logits_mb)
@@ -386,7 +314,7 @@ class FedKDDistillationModel(Strategy):
     self.communication_costs["total_round_mb"].append(total_round_mb)
 
     print(
-      f"[FedKD-Server] Round {server_round}: Server->Client: {server_to_client_logits_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
+      f"[FedKD] Round {server_round}: Server->Client: {server_to_client_logits_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
     )
 
     # メトリクスの集約
@@ -396,7 +324,9 @@ class FedKDDistillationModel(Strategy):
       aggregated_metrics = self.fit_metrics_aggregation_fn(fit_metrics)
 
     # 現在の温度をメトリクスに追加
-    aggregated_metrics["current_kd_temperature"] = self.kd_temperature
+    aggregated_metrics["current_temperature"] = self.kd_temperature
+    if self.avg_logits:
+      aggregated_metrics["num_aggregated_batches"] = len(self.avg_logits)
 
     # 通信コストをメトリクスに追加
     aggregated_metrics["comm_cost_server_to_client_mb"] = server_to_client_logits_mb
@@ -410,8 +340,11 @@ class FedKDDistillationModel(Strategy):
       "comm_cost_client_to_server_logits_mb": total_logits_mb,
       "comm_cost_total_round_mb": total_round_mb,
       "comm_cost_cumulative_mb": sum(self.communication_costs["total_round_mb"]),
-      "current_kd_temperature": self.kd_temperature,
+      "current_temperature": self.kd_temperature,
     }
+
+    if self.avg_logits:
+      communication_metrics["num_aggregated_batches"] = len(self.avg_logits)
 
     self.store_results_and_log(server_round=server_round, tag="communication_costs", results_dict=communication_metrics)
 
@@ -446,18 +379,9 @@ class FedKDDistillationModel(Strategy):
     # 現在のラウンド情報を追加
     config["current_round"] = server_round
 
-    # サーバーで生成されたロジットがある場合のみ追加
-    if self.server_generated_logits:
-      config["avg_logits"] = batch_list_to_base64(self.server_generated_logits)
-
-    # サーバーモデルのパラメータを取得してクライアントに送信
-    if self.server_model is not None:
-      ndarrays = [val.cpu().numpy() for _, val in self.server_model.state_dict().items()]
-      parameters = ndarrays_to_parameters(ndarrays)
-      print(f"[FedKD-DistillationModel] Round {server_round}: Sending server model parameters to clients for evaluation")
-    else:
-      print(f"[FedKD-DistillationModel] Round {server_round}: No server model available, using provided parameters")
-
+    # 前回のラウンドで集約されたロジットがある場合のみ追加
+    if self.avg_logits:
+      config["avg_logits"] = batch_list_to_base64(self.avg_logits)
     # 初回ラウンドではロジットが存在しないため、avg_logitsキーを含めない
     evaluate_ins = EvaluateIns(parameters, config)
 
@@ -519,7 +443,7 @@ class FedKDDistillationModel(Strategy):
     # 精度情報のログ出力
     if "accuracy" in metrics_aggregated:
       accuracy = metrics_aggregated["accuracy"]
-      print(f"[FedKD-Server] Round {server_round} - Accuracy: {accuracy:.4f}, Loss: {loss_aggregated:.4f}")
+      print(f"[FedKD] Round {server_round} - Accuracy: {accuracy:.4f}, Loss: {loss_aggregated:.4f}")
 
     # Store and log FedKD evaluation results
     self.store_results_and_log(
@@ -534,20 +458,20 @@ class FedKDDistillationModel(Strategy):
   def evaluate(self, server_round: int, parameters: Parameters) -> Optional[Tuple[float, Dict[str, Scalar]]]:
     """Evaluate the current model parameters.
 
-    This FedKD implementation with server-side model training performs knowledge distillation
-    using client-aggregated logits and generates new logits using the trained server model.
+    FedKD uses logit-based knowledge distillation instead of parameter aggregation.
+    Server-side centralized evaluation is not applicable for this strategy.
 
     Parameters
     ----------
     server_round : int
         The current round of federated learning.
     parameters: Parameters
-        The current (global) model parameters (unused in FedKD with server model).
+        The current (global) model parameters (unused in FedKD).
 
     Returns
     -------
     evaluation_result : Optional[Tuple[float, Dict[str, Scalar]]]
-        Always returns None as FedKD focuses on logit-based knowledge distillation.
+        Always returns None as FedKD does not perform centralized evaluation.
     """
     # FedKDはロジットベースの知識蒸留を使用するため、
     # サーバー側でのパラメータベース評価は行わない

@@ -1,13 +1,13 @@
 from fed.util.model_util import weighted_average
 from flwr.server import ServerAppComponents, ServerConfig
 
-from ..strategy.fed_kd_weighted_avg import FedKDWeightedAvg
+from ..strategy.fed_md_weighted_avg import FedMdWeightedAvg
 
 
-class FedKDWeightedAvgServer:
+class FedMdWeightedAvgServer:
   @staticmethod
   def create_server(use_wandb: bool, run_config, num_rounds: int) -> ServerAppComponents:
-    strategy = FedKDWeightedAvg(
+    strategy = FedMdWeightedAvg(
       run_config=run_config,
       use_wandb=use_wandb,
       fraction_fit=1.0,

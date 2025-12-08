@@ -176,12 +176,13 @@ class CNNTask:
 
     return logits
 
+  @staticmethod
   def inference_with_loca_extended(
     net: BaseModel,
     data_loader: DataLoader,
     device: torch.device,
     tau: float = 0.99,
-    alpha: float = 1.05,
+    alpha: float = 1.1,
   ) -> list[torch.Tensor]:
     net.to(device)
     net.eval()
