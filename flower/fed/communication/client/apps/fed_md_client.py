@@ -1,5 +1,3 @@
-"""FedKD with Logit Sharing: Flower / PyTorch app"""
-
 import copy
 from typing import Dict, Tuple
 
@@ -20,8 +18,6 @@ from torch.utils.data import DataLoader
 
 
 class FedMdClient(NumPyClient):
-  """FedMD client with knowledge distillation and logit sharing capabilities."""
-
   def __init__(
     self,
     net: BaseModel,

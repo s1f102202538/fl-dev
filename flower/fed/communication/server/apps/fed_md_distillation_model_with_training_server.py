@@ -17,19 +17,6 @@ class FedMdDistillationModelWithTrainingServer:
     run_config,
     num_rounds: int,
   ) -> ServerAppComponents:
-    """Create FedKD Public Distillation server with public data pre-training.
-
-    Args:
-        server_model: Pre-created server-side model
-        public_data_loader: Pre-loaded public data loader
-        server_device: Device to run server model on
-        use_wandb: Whether to use Weights & Biases for logging
-        run_config: Configuration for the federated learning run
-        num_rounds: Number of federated learning rounds
-
-    Returns:
-        ServerAppComponents with FedKDPublicDistillation strategy
-    """
     # Move server model to specified device
     server_model.to(server_device)
 
@@ -42,11 +29,11 @@ class FedMdDistillationModelWithTrainingServer:
       fraction_fit=1.0,
       fraction_evaluate=1.0,
       evaluate_metrics_aggregation_fn=weighted_average,
-      distillation_epochs=5,  # Knowledge distillation training epochs (rounds 2+)
-      distillation_learning_rate=0.001,  # Knowledge distillation learning rate (rounds 2+)
-      public_training_epochs=5,  # Public data training epochs (all rounds)
-      public_training_learning_rate=0.01,  # Public data training learning rate (all rounds)
-      kd_temperature=3.0,  # Knowledge distillation temperature
+      distillation_epochs=5,
+      distillation_learning_rate=0.001,
+      public_training_epochs=5,
+      public_training_learning_rate=0.01,
+      kd_temperature=3.0,
       min_fit_clients=5,
       min_evaluate_clients=5,
       min_available_clients=5,

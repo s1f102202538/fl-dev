@@ -17,19 +17,6 @@ class FedMdDistillationModelServer:
     run_config,
     num_rounds: int,
   ) -> ServerAppComponents:
-    """Create FedKD Distillation Model server with server-side model training.
-
-    Args:
-        server_model: Pre-created server-side model
-        public_data_loader: Pre-loaded public data loader
-        server_device: Device to run server model on
-        use_wandb: Whether to use Weights & Biases for logging
-        run_config: Configuration for the federated learning run
-        num_rounds: Number of federated learning rounds
-
-    Returns:
-        ServerAppComponents with FedKDDistillationModel strategy
-    """
     # Move server model to specified device
     server_model.to(server_device)
 

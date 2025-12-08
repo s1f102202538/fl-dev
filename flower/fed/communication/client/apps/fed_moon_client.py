@@ -1,5 +1,3 @@
-"""FedMoon with Logit Sharing: Flower / PyTorch app"""
-
 import copy
 from typing import Dict, Tuple
 
@@ -21,8 +19,6 @@ from torch.utils.data import DataLoader
 
 
 class FedMoonClient(NumPyClient):
-  """FedMoon client with logit sharing capabilities."""
-
   def __init__(
     self,
     net: BaseModel,

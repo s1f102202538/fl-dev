@@ -34,18 +34,6 @@ from torch.utils.data import DataLoader
 
 
 class FedMdParamsShare(Strategy):
-  """Federated Learning strategy with logit aggregation and parameter distribution.
-
-  This strategy combines:
-  1. Server-side: Send model parameters to clients
-  2. Client-side: Train locally and generate logits from trained model
-  3. Client-side: Send logits back to server
-  4. Server-side: Aggregate logits and perform knowledge distillation on server model
-
-  Flow:
-  - Round 1+: Server sends parameters → Clients train → Clients return logits → Server aggregates logits and distills
-  """
-
   def __init__(
     self,
     *,
@@ -114,7 +102,6 @@ class FedMdParamsShare(Strategy):
     print(f"[W&B] Initialized project: {wandb_project_name}")
 
   def _aggregate_logits(self, client_logits_list: List[List[Tensor]], weights: List[int]) -> List[Tensor]:
-    """Aggregate logits from multiple clients using simple average."""
     num_clients = len(client_logits_list)
     num_batches = len(client_logits_list[0])
 
@@ -134,8 +121,6 @@ class FedMdParamsShare(Strategy):
     return aggregated
 
   def _distill_server_model(self, server_round: int) -> None:
-    """Perform knowledge distillation on server model using aggregated client logits."""
-
     distillation = Distillation(
       studentModel=self.server_model,
       public_data=self.public_data_loader,
@@ -153,7 +138,6 @@ class FedMdParamsShare(Strategy):
     print(f"[FedKD-ParamsShare] Round {server_round}: Server model distillation completed")
 
   def store_results_and_log(self, server_round: int, tag: str, results_dict: Dict) -> None:
-    """A helper method that stores results and logs them to W&B if enabled."""
     # Store results
     if tag not in self.results:
       self.results[tag] = {}

@@ -1,5 +1,3 @@
-"""FedMoon with Parameter Sharing: Flower / PyTorch app"""
-
 import copy
 from typing import Dict, Tuple
 
@@ -20,8 +18,6 @@ from torch.utils.data import DataLoader
 
 
 class FedMoonParamsShareCsdClient(NumPyClient):
-  """FedMoon client that receives parameters and returns logits."""
-
   def __init__(
     self,
     net: BaseModel,

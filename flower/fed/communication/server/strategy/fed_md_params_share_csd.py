@@ -33,18 +33,6 @@ from torch.utils.data import DataLoader
 
 
 class FedMdParamsShareCsd(Strategy):
-  """Federated Learning strategy with logit aggregation and parameter distribution.
-
-  This strategy combines:
-  1. Server-side: Send model parameters to clients
-  2. Client-side: Train locally and generate logits from trained model
-  3. Client-side: Send logits back to server
-  4. Server-side: Aggregate logits and perform knowledge distillation on server model
-
-  Flow:
-  - Round 1+: Server sends parameters → Clients train → Clients return logits → Server aggregates logits and distills
-  """
-
   def __init__(
     self,
     *,
@@ -138,14 +126,6 @@ class FedMdParamsShareCsd(Strategy):
     return aggregated
 
   def _create_class_prototypes(self, server_round: int) -> Tensor:
-    """Create class prototypes from aggregated logits using public data.
-
-    Args:
-        server_round: Current federated learning round
-
-    Returns:
-        Tensor of shape [n_classes, logit_dim] containing class prototypes
-    """
     print(f"[FedKD-CSD] Round {server_round}: Creating class prototypes from aggregated logits")
 
     # Collect all labels from public data

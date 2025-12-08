@@ -18,24 +18,6 @@ class FedMdParamsShareServer:
     run_config,
     num_rounds: int,
   ) -> ServerAppComponents:
-    """Create FedKD Parameter Sharing server.
-
-    This server:
-    1. Aggregates model parameters from clients (FedAvg-style)
-    2. Generates logits from aggregated model
-    3. Distributes logits to clients for knowledge distillation
-
-    Args:
-        server_model: Pre-created server-side model
-        public_data_loader: Pre-loaded public data loader for logit generation
-        server_device: Device to run server model on
-        use_wandb: Whether to use Weights & Biases for logging
-        run_config: Configuration for the federated learning run
-        num_rounds: Number of federated learning rounds
-
-    Returns:
-        ServerAppComponents with FedKDParamsShare strategy
-    """
     # Move server model to specified device
     server_model.to(server_device)
 

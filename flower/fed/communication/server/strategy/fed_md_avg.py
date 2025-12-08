@@ -43,10 +43,7 @@ class FedMdAvg(Strategy):
     run_config: UserConfig,
     use_wandb: bool = False,
     # Simplified logit filtering parameters
-    logit_temperature: float = 3.0,  # 温度スケーリングパラメータ
-    kd_temperature: float = 5.0,  # 知識蒸留用温度
-    entropy_threshold: float = 0.01,  # エントロピー閾値（最小品質保証用）
-    confidence_threshold: float = 0.08,  # 信頼度閾値（現実的な学習初期値）
+    kd_temperature: float = 3.0,  # 知識蒸留用温度
   ) -> None:
     self.fraction_fit = fraction_fit
     self.fraction_evaluate = fraction_evaluate
@@ -61,10 +58,6 @@ class FedMdAvg(Strategy):
     self.evaluate_metrics_aggregation_fn = evaluate_metrics_aggregation_fn
     self.avg_logits: List[Tensor] = []
 
-    # Simplified logit filtering parameters
-    self.logit_temperature = logit_temperature
-    self.entropy_threshold = entropy_threshold
-    self.confidence_threshold = confidence_threshold
     self.kd_temperature = kd_temperature
 
     self.save_path, self.run_dir = create_run_dir(run_config)
@@ -194,10 +187,7 @@ class FedMdAvg(Strategy):
       server_to_client_mb = calculate_data_size_mb(logits_data)
       # 固定温度をクライアントに送信
       config["temperature"] = self.kd_temperature
-      config["logit_temperature"] = self.logit_temperature
-      print(
-        f"[FedKD] Sending {len(aggregated_logits)} aggregated logit batches (KD temp: {self.kd_temperature:.3f}, logit temp: {self.logit_temperature:.3f}, size: {server_to_client_mb:.4f} MB)"
-      )
+      print(f"[FedKD] Sending {len(aggregated_logits)} aggregated logit batches (KD temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)")
     else:
       print("[FedKD] No logits available for this round")
 
@@ -274,7 +264,6 @@ class FedMdAvg(Strategy):
 
     # 現在の温度をメトリクスに追加
     aggregated_metrics["current_kd_temperature"] = self.kd_temperature
-    aggregated_metrics["current_logit_temperature"] = self.logit_temperature
     if self.avg_logits:
       aggregated_metrics["num_aggregated_batches"] = len(self.avg_logits)
 
@@ -291,7 +280,6 @@ class FedMdAvg(Strategy):
       "comm_cost_total_round_mb": total_round_mb,
       "comm_cost_cumulative_mb": sum(self.communication_costs["total_round_mb"]),
       "current_kd_temperature": self.kd_temperature,
-      "current_logit_temperature": self.logit_temperature,
     }
 
     # 品質メトリクスは削除済み（簡素化のため）

@@ -18,8 +18,6 @@ from torch import Tensor
 
 
 class FedMdWeightedAvg(Strategy):
-  """Federated Model Distillation (FedMD) strategy."""
-
   def __init__(
     self,
     *,

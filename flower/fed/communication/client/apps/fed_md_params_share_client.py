@@ -1,5 +1,3 @@
-"""FedKD with Parameter Sharing: Flower / PyTorch app - Clients return logits"""
-
 from typing import Dict, Tuple
 
 import torch
@@ -13,15 +11,6 @@ from torch.utils.data import DataLoader
 
 
 class FedMdParamsShareClient(NumPyClient):
-  """FedMD client that receives parameters and returns logits.
-
-  This client:
-  1. Receives model parameters from server
-  2. Trains the model locally
-  3. Generates logits from trained model
-  4. Sends logits back to server
-  """
-
   def __init__(
     self,
     net: BaseModel,

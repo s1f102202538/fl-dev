@@ -30,26 +30,6 @@ class FedMdParamsShareCsdServer:
     run_config,
     num_rounds: int,
   ) -> ServerAppComponents:
-    """Create FedKD Parameter Sharing server with CSD.
-
-    This server:
-    1. Sends model parameters to clients
-    2. Receives logits from clients after MOON training
-    3. Aggregates logits and creates class prototypes
-    4. Performs knowledge distillation on server model
-    5. Sends class prototypes to clients for similarity-based distillation
-
-    Args:
-        server_model: Pre-created server-side model
-        public_data_loader: Pre-loaded public data loader for distillation
-        server_device: Device to run server model on
-        use_wandb: Whether to use Weights & Biases for logging
-        run_config: Configuration for the federated learning run
-        num_rounds: Number of federated learning rounds
-
-    Returns:
-        ServerAppComponents with FedKDParamsShareCsd strategy
-    """
     # Move server model to specified device
     server_model.to(server_device)
 

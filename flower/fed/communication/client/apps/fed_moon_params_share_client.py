@@ -1,5 +1,3 @@
-"""FedMoon with Parameter Sharing: Flower / PyTorch app"""
-
 import copy
 from typing import Dict, Tuple
 
@@ -20,8 +18,6 @@ from torch.utils.data import DataLoader
 
 
 class FedMoonParamsShareClient(NumPyClient):
-  """FedMoon client that receives parameters and returns logits."""
-
   def __init__(
     self,
     net: BaseModel,
@@ -61,8 +57,6 @@ class FedMoonParamsShareClient(NumPyClient):
     )
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    """FedMoon client training: receive parameters, train with MOON, return logits."""
-
     # Apply server parameters to local model
     if parameters is not None and len(parameters) > 0:
       print("[INFO] Applying server parameters to local model")
