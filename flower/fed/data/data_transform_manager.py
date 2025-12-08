@@ -18,7 +18,6 @@ class DataTransformManager:
     self._setup_transforms()
 
   def _setup_transforms(self):
-    """Setup data transforms based on dataset."""
     if "zalando-datasets/fashion_mnist" in self.config.dataset_name.lower():
       normalization = ((0.1307,), (0.3081,))
       crop_size = 28
@@ -41,7 +40,6 @@ class DataTransformManager:
     )
 
   def apply_train_transforms(self, batch: Dict[str, Any]) -> Dict[str, Any]:
-    """Apply transforms to the training partition."""
     # CIFAR-10データセットでは'img'キーを使用
     image_key = "img" if "img" in batch else "image"
 
@@ -58,7 +56,6 @@ class DataTransformManager:
     return batch
 
   def apply_eval_transforms(self, batch: Dict[str, Any]) -> Dict[str, Any]:
-    """Apply transforms to the evaluation partition."""
     # CIFAR-10データセットでは'img'キーを使用
     image_key = "img" if "img" in batch else "image"
 

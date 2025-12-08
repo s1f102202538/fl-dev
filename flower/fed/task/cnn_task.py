@@ -52,13 +52,6 @@ class CNNTask:
 
   @staticmethod
   def inference(net: BaseModel, data_loader: DataLoader, device: torch.device) -> list[torch.Tensor]:
-    """Generate logits without any correction.
-
-    Args:
-        net: Model to generate logits from
-        data_loader: DataLoader containing data
-        device: Device to run inference on
-    """
     net.to(device)
     net.eval()
     logits = []
@@ -72,17 +65,6 @@ class CNNTask:
 
   @staticmethod
   def inference_with_label_correction(net: BaseModel, data_loader: DataLoader, device: torch.device, correction_strength: float = 1.0) -> list[torch.Tensor]:
-    """Generate logits with label-based correction using top1-top2 margin.
-
-    Args:
-        net: Model to generate logits from
-        data_loader: DataLoader containing labeled IID public data
-        device: Device to run inference on
-        correction_strength: Strength multiplier for correction (default: 1.0)
-
-    Returns:
-        List of corrected logit tensors
-    """
     net.to(device)
     net.eval()
     logits = []
@@ -110,30 +92,6 @@ class CNNTask:
 
   @staticmethod
   def inference_with_loca(net: BaseModel, data_loader: DataLoader, device: torch.device, tau: float = 0.9) -> list[torch.Tensor]:
-    """
-    Generate logits with LoCa (Logit Calibration) correction.
-
-    論文準拠の実装（ロジット空間で補正）:
-      1. ロジットから確率分布を計算して縮小係数 s を求める
-      2. 非正解クラスのロジットを s でスケーリング（ロジット空間）
-      3. 補正後のロジットを返す
-
-    LoCa 論文の定義:
-      s_max = 1 / (1 - p_y + p_biggest)
-      s = τ * s_max
-      ここで τ は "shrink factor" (0 < τ ≤ 1)
-      τ が小さいほど非正解クラスを強く抑制
-
-    Args:
-        net: Model to generate logits from
-        data_loader: DataLoader containing labeled data
-        device: Device to run inference on
-        tau: LoCa の縮小係数 τ（0 < τ ≤ 1）
-             τ=1.0 で最小限の補正、τ→0 で強い抑制
-
-    Returns:
-        List of LoCa-calibrated logit tensors
-    """
     net.to(device)
     net.eval()
     logits = []

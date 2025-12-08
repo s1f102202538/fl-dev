@@ -4,7 +4,6 @@ from ..data.data_loader_config import DataLoaderConfig
 
 
 def create_partitioner(config: DataLoaderConfig) -> Partitioner:
-  """Create partitioner based on configuration."""
   if config.partitioner_type.lower() == "dirichlet":
     return DirichletPartitioner(
       num_partitions=config.num_partitions,

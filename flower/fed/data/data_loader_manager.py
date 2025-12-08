@@ -66,17 +66,6 @@ class DataLoaderManager:
 
   @staticmethod
   def _validate_config(config: DataLoaderConfig) -> int:
-    """Validate configuration and return total test samples.
-
-    Args:
-      config: DataLoaderConfig instance
-
-    Returns:
-      Total number of test samples available
-
-    Raises:
-      ValueError: If configuration is invalid
-    """
     # Load dataset to check available samples (using cache)
     full_test_dataset = DataLoaderManager._get_cached_dataset(config.dataset_name, "test")
     total_test_samples = len(full_test_dataset)  # type: ignore
@@ -93,14 +82,6 @@ class DataLoaderManager:
     return total_test_samples
 
   def load_train_data(self, config: DataLoaderConfig) -> DataLoader:
-    """Load training data for federated learning.
-
-    Args:
-      config: DataLoaderConfig instance containing partition settings
-
-    Returns:
-      DataLoader for training data
-    """
     # Preload dataset (first time only, to avoid API rate limiting)
     self._preload_dataset_once(config.dataset_name)
 
@@ -129,14 +110,6 @@ class DataLoaderManager:
     return train_loader
 
   def load_test_data(self, config: DataLoaderConfig) -> DataLoader:
-    """Load test data for evaluation.
-
-    Args:
-      config: DataLoaderConfig instance
-
-    Returns:
-      DataLoader for evaluation test data
-    """
     # Validate configuration
     self._validate_config(config)
 
@@ -153,14 +126,6 @@ class DataLoaderManager:
     return test_loader
 
   def load_public_data(self, config: DataLoaderConfig) -> DataLoader:
-    """Load public data for knowledge distillation.
-
-    Args:
-      config: DataLoaderConfig instance
-
-    Returns:
-      DataLoader for public data
-    """
     # Validate configuration
     self._validate_config(config)
 

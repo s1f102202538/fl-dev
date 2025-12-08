@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
@@ -18,12 +18,6 @@ class LoCaBasedDistillation:
     public_data: DataLoader,
     soft_targets: List[torch.Tensor],
   ) -> None:
-    """
-    Args:
-        studentModel: 生徒モデル（BaseModel）
-        public_data: 公開データの DataLoader（**shuffle=False を推奨**）
-        soft_targets: サーバから渡されたソフトターゲット（通常は logits のリスト）
-    """
     self.studentModel = studentModel
     self.public_data = public_data
     self.soft_targets = soft_targets
@@ -59,28 +53,6 @@ class LoCaBasedDistillation:
     labels: torch.Tensor,
     tau: float = 0.9,
   ) -> torch.Tensor:
-    """LoCa ロジット校正（Teacher ロジットに適用）
-
-    論文準拠の実装（ロジット空間で補正）:
-      1. ロジットから確率分布を計算して縮小係数 s を求める
-      2. 非正解クラスのロジットを s でスケーリング（ロジット空間）
-      3. 補正後のロジットを返す
-
-    LoCa 論文の定義:
-      s_max = 1 / (1 - p_y + p_biggest)
-      s = τ * s_max
-      ここで τ は "shrink factor" (0 < τ ≤ 1)
-      τ が小さいほど非正解クラスを強く抑制
-
-    Args:
-        teacher_logits: shape (B, C) の未正規化ロジット（クライアントから集約済み）
-        labels: shape (B,) のラベル（サーバの公開データから取得）
-        tau: LoCa の縮小係数 τ（0 < τ ≤ 1、デフォルト 0.9）
-             τ=1.0 で最小限の補正、τ→0 で強い抑制
-
-    Returns:
-        LoCa 補正後のロジット [B, C]
-    """
     if teacher_logits.dim() != 2:
       raise ValueError(f"teacher_logits must be 2D, got {teacher_logits.shape}")
 
@@ -130,31 +102,6 @@ class LoCaBasedDistillation:
     debug_print_first_batch: bool = True,
     loca_tau: float = 0.92,
   ) -> BaseModel:
-    """
-    実際の蒸留学習ループ（LoCa を組み込んだ版）
-
-    前提:
-        - クライアントから送信されるロジットは補正なし（生のロジット）
-        - サーバ側でこのメソッドが公開データのラベルを使って LoCa 補正を適用
-        - 補正により非正解クラスを縮小し、正解クラスを強調
-
-    Args:
-        epochs: epoch 数
-        learning_rate: 学習率
-        T: 温度 (distillation temperature)
-        alpha: KL 蒸留損失の重み
-        beta: CE 損失の重み
-        device: cpu / cuda device
-        early_stopping_patience: early stopping の patience
-        grad_clip: gradient clipping の閾値
-        debug_print_first_batch: 最初のバッチでデバッグ情報を表示
-        loca_tau: LoCa の縮小係数 τ（0 < τ ≤ 1、デフォルト 0.9）
-                  τ が小さいほど非正解クラスを強く抑制
-
-    Returns:
-        蒸留後の student モデル
-    """
-
     ce_loss = nn.CrossEntropyLoss()
     optimizer = Adam(self.studentModel.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)

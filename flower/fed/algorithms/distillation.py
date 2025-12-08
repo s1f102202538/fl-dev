@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
@@ -17,16 +17,7 @@ class Distillation:
     studentModel: BaseModel,
     public_data: DataLoader,
     soft_targets: List[torch.Tensor],
-    *,
-    shuffle_public_data: bool = False,
   ) -> None:
-    """
-    Args:
-        studentModel: 生徒モデル（BaseModel）
-        public_data: 公開データの DataLoader（**shuffle=False を推奨**）
-        soft_targets: サーバから渡されたソフトターゲット（通常は logits のリスト）
-        shuffle_public_data: DataLoader が shuffle=True の場合、対応が崩れるので False を推奨
-    """
     self.studentModel = studentModel
     self.public_data = public_data
     self.soft_targets = soft_targets
@@ -34,9 +25,6 @@ class Distillation:
     self.is_batch_list = isinstance(soft_targets, list) and len(soft_targets) > 0 and isinstance(soft_targets[0], torch.Tensor)
     if self.is_batch_list:
       self._validate_batch_counts()
-
-    if shuffle_public_data:
-      print("Warning: public_data was created with shuffle=True. This often breaks correspondence with soft_targets.")
 
   def _validate_batch_counts(self) -> None:
     expected_batches = len(self.public_data)
@@ -72,21 +60,6 @@ class Distillation:
     grad_clip: float = 1.0,
     debug_print_first_batch: bool = True,
   ) -> BaseModel:
-    """
-    実際の蒸留学習ループ（改良版）
-
-    Args:
-        epochs: epoch 数
-        learning_rate: 学習率
-        T: 温度
-        alpha: KL 蒸留損失の重み
-        beta: CE 損失の重み
-        device: cpu / cuda device
-        early_stopping_patience: 早期終了の patience
-        grad_clip: 勾配クリッピングの max_norm
-        debug_print_first_batch: 先頭バッチ時にデバッグ統計を出力するか
-    """
-
     ce_loss = nn.CrossEntropyLoss()
     optimizer = Adam(self.studentModel.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
@@ -100,7 +73,7 @@ class Distillation:
     if not self.is_batch_list:
       raise ValueError("soft_targets must be a non-empty list of torch.Tensor (one tensor per public-data batch).")
 
-    # 事前に soft_targets を device に移動（遅延転送ではなく一括転送）
+    # 事前に soft_targets を device に移動
     # soft_targets の各要素はバッチ単位のテンソル (batch_size, num_classes) を想定
     self.soft_targets = [st.to(device) for st in self.soft_targets]
 

@@ -7,21 +7,12 @@ from ..models.base_model import BaseModel
 
 
 class LogitCalibrationMoonContrastiveLearning:
-  """FedMoon対比学習"""
-
   def __init__(
     self,
     mu: float = 3.0,
     temperature: float = 0.3,
     device: torch.device | None = None,
   ):
-    """Moon対比学習を初期化
-
-    Args:
-        mu: 対比損失の重み
-        temperature: 対比損失の温度
-        device: 計算に使用するデバイス
-    """
     self.mu = mu
     self.temperature = temperature
     self.device = device or torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -31,12 +22,6 @@ class LogitCalibrationMoonContrastiveLearning:
     self.previous_model = None  # 単一の前回モデルを保持
 
   def update_models(self, previous_model: BaseModel, global_model: BaseModel) -> None:
-    """グローバルモデルと前回モデルの状態を更新
-
-    Args:
-        previous_model: 前回のローカルモデル
-        global_model: グローバルモデル
-    """
     # 前回のローカルモデルを保存
     if self.previous_model is None:
       self.previous_model = copy.deepcopy(previous_model)
@@ -62,18 +47,9 @@ class LogitCalibrationMoonContrastiveLearning:
     self.global_model.to(self.device)  # デバイスに移動
 
     has_previous = self.previous_model is not None
-    print(f"MOON models updated: mu={self.mu}, temperature={self.temperature}, has_previous_model={has_previous}")
+    print(f"[FedLC-MOON] Models updated: mu={self.mu}, temperature={self.temperature}, has_previous_model={has_previous}")
 
   def compute_contrastive_loss(self, features: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
-    """対比損失計算
-
-    Args:
-        features: ローカルモデルからの投影特徴量
-        images: 入力画像
-
-    Returns:
-        対比損失テンソル
-    """
     if self.global_model is None or self.previous_model is None:
       return torch.tensor(0.0, device=self.device, requires_grad=True)
 
@@ -119,13 +95,6 @@ class LogitCalibrationMoonContrastiveLearning:
     return contrastive_loss
 
   def _apply_fedlc_calibration(self, outputs: torch.Tensor, labels: torch.Tensor, class_counts: torch.Tensor, tau: float = 1.0) -> torch.Tensor:
-    """
-    FedLC 校正をロジットに適用
-    outputs: (B, C) ロジット
-    labels: (B,) 正解ラベル
-    class_counts: (C,) クラスごとのサンプル数
-    tau: 校正スケーリング係数
-    """
     device = outputs.device
     n_classes = outputs.size(1)
     margin = torch.zeros_like(outputs)
@@ -154,19 +123,11 @@ class LogitCalibrationMoonContrastiveLearning:
 
 
 class LogitCalibrationMoonTrainer:
-  """FedMoon訓練実装"""
-
   def __init__(
     self,
     moon_learner: LogitCalibrationMoonContrastiveLearning,
     device: torch.device | None = None,
   ):
-    """Moonトレーナーを初期化
-
-    Args:
-        moon_learner: Moon対比学習インスタンス
-        device: 計算に使用するデバイス
-    """
     self.moon_learner = moon_learner
     self.device = device or torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -179,19 +140,6 @@ class LogitCalibrationMoonTrainer:
     args_optimizer: str = "sgd",
     weight_decay: float = 1e-5,
   ) -> float:
-    """FedMoon対比学習による訓練
-
-    Args:
-        model: ニューラルネットワークモデル
-        train_loader: 訓練データローダー
-        lr: 学習率
-        epochs: エポック数
-        args_optimizer: オプティマイザータイプ
-        weight_decay: 重み減衰
-
-    Returns:
-        平均訓練損失
-    """
     model.to(self.device)
     criterion = nn.CrossEntropyLoss().to(self.device)
 
@@ -201,7 +149,7 @@ class LogitCalibrationMoonTrainer:
     else:  # SGD (default)
       optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, model.parameters()), lr=lr, momentum=0.9, weight_decay=weight_decay)
 
-    print(f"[MOON] Using optimizer={args_optimizer}, LR={lr:.6f}, weight_decay={weight_decay}")
+    print(f"[FedLC-MOON] Using optimizer={args_optimizer}, LR={lr:.6f}, weight_decay={weight_decay}")
 
     model.train()
     running_loss = 0.0

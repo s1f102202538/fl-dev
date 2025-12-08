@@ -10,7 +10,6 @@ from fed.task.cnn_task import CNNTask
 from fed.util.model_util import (
   base64_to_batch_list,
   batch_list_to_base64,
-  filter_and_calibrate_logits,
   load_model_from_state,
   save_model_to_state,
 )
@@ -128,14 +127,10 @@ class FedMdClient(NumPyClient):
     """Generate and filter logits for sharing with server using enhanced filtering."""
 
     # Generate raw logits using trained model
-    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
+    logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
+    print(f"[DEBUG] logits generated: {len(logits)} batches")
 
-    # Apply basic calibration without quality filtering
-    filtered_logits = filter_and_calibrate_logits(raw_logits)
-    print(f"[DEBUG] Calibrated logits: {len(filtered_logits)} batches (no filtering)")
-
-    return filtered_logits
+    return logits
 
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
     """Evaluate model performance on validation data."""

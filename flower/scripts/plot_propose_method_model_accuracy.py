@@ -1,19 +1,11 @@
-"""matplotlib 折れ線グラフ作成テンプレート"""
-
 import matplotlib.pyplot as plt
 
-# フォント・スタイル設定
 plt.rcParams["font.family"] = "DejaVu Sans"
 plt.rcParams["figure.figsize"] = (10, 6)
 plt.rcParams["font.size"] = 12
 
-# ===== データ入力部分 =====
-# ここにデータを入力してください
-
-# X軸データ（例: ラウンド数、エポック数など）
 x_data = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
-# Y軸データ（複数系列）
 y_data1 = [
   62.903225806451616,
   67.0866935483871,
@@ -51,20 +43,15 @@ y_data3 = [
   64.92943548387098,
 ]
 
-# ラベル設定
 x_label = "Round"
 y_label = "Accuracy [%]"
 title = "Impact of each component on model accuracy"
 legend_labels = ["Baseline + Params Share + Logit Calibration (Full)", "Baseline + Params Share (Params Share)", "MOON + Logit Share (Baseline)"]
 
-# ===== グラフ作成部分 =====
-
 
 def plot_line_graph():
-  """折れ線グラフを作成"""
   plt.figure(figsize=(10, 6))
 
-  # データ系列をプロット（必要に応じてコメントアウト/追加）
   if y_data1:
     plt.plot(x_data, y_data1, marker="o", label=legend_labels[0], linewidth=2)
   if y_data2:
@@ -72,24 +59,19 @@ def plot_line_graph():
   if y_data3:
     plt.plot(x_data, y_data3, marker="^", label=legend_labels[2], linewidth=2)
 
-  # 軸ラベルとタイトル
   plt.xlabel(x_label)
   plt.ylabel(y_label)
   plt.title(title)
 
-  # 凡例とグリッド
   plt.legend()
   plt.grid(True, alpha=0.3)
 
-  # レイアウト調整と保存
   plt.tight_layout()
   plt.savefig("line_graph.png", dpi=300, bbox_inches="tight")
   plt.show()
 
 
-# ===== 実行部分 =====
 if __name__ == "__main__":
-  # データを入力後、この関数を実行
   plot_line_graph()
 
   print("グラフが作成されました: line_graph.png")
