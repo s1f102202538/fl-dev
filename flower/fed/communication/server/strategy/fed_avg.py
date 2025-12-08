@@ -34,7 +34,7 @@ class CustomFedAvg(FedAvg):
     # A dictionary to store results as they come
     self.results: Dict = {}
 
-    # 通信コスト追跡用の変数
+    # 通信コスト追跡用の変数（ラウンド1の初期パラメータ配布は除外）
     self.communication_costs: Dict[str, List[float]] = {
       "server_to_client_params_mb": [],  # サーバからクライアントへのパラメータ送信コスト
       "client_to_server_params_mb": [],  # クライアントからサーバへのパラメータ送信コスト
@@ -58,17 +58,24 @@ class CustomFedAvg(FedAvg):
     # 基底クラスのconfigure_fitを呼び出してクライアント設定を取得
     config_list = super().configure_fit(server_round, parameters, client_manager)
 
-    # 送信パラメータのサイズを測定
-    comm_cost = calculate_communication_cost(parameters)
-    # 実際に送信される総量は (パラメータサイズ × クライアント数)
     num_clients = len(config_list)
-    total_server_to_client_mb = comm_cost["size_mb"] * num_clients
-    self.communication_costs["server_to_client_params_mb"].append(total_server_to_client_mb)
 
-    logger.log(
-      INFO,
-      f"Round {server_round}: Server->Client parameters: {comm_cost['size_mb']:.4f} MB per client, total: {total_server_to_client_mb:.4f} MB ({num_clients} clients)",
-    )
+    # ラウンド1は初期パラメータ配布なので通信コストに含めない
+    if server_round == 1:
+      self.communication_costs["server_to_client_params_mb"].append(0.0)
+      logger.log(
+        INFO,
+        f"Round {server_round}: Sending initial parameters to {num_clients} clients (not counted in communication cost)",
+      )
+    else:
+      # ラウンド2以降は通信コストに含める
+      comm_cost = calculate_communication_cost(parameters)
+      total_server_to_client_mb = comm_cost["size_mb"] * num_clients
+      self.communication_costs["server_to_client_params_mb"].append(total_server_to_client_mb)
+      logger.log(
+        INFO,
+        f"Round {server_round}: Server->Client parameters: {comm_cost['size_mb']:.4f} MB per client, total: {total_server_to_client_mb:.4f} MB ({num_clients} clients)",
+      )
 
     return config_list
 
