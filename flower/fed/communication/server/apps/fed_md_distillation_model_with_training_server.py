@@ -4,10 +4,10 @@ from flwr.server import ServerAppComponents, ServerConfig
 from torch import device
 from torch.utils.data import DataLoader
 
-from ..strategy.fed_md_public_distillation import FedMdPublicDistillation
+from ..strategy.fed_md_distillation_model_with_training import FedMdDistillationModelWithTraining
 
 
-class FedMdPublicDistillationServer:
+class FedMdDistillationModelWithTrainingServer:
   @staticmethod
   def create_server(
     server_model: BaseModel,
@@ -34,7 +34,7 @@ class FedMdPublicDistillationServer:
     server_model.to(server_device)
 
     # Create strategy with server model and public data
-    strategy = FedMdPublicDistillation(
+    strategy = FedMdDistillationModelWithTraining(
       server_model=server_model,
       public_data_loader=public_data_loader,
       run_config=run_config,

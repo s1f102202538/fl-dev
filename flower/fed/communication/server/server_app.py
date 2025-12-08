@@ -10,9 +10,9 @@ from torch import device
 from .apps.fed_avg_server import FedAvgServer
 from .apps.fed_md_avg_server import FedMdAvgServer
 from .apps.fed_md_distillation_model_server import FedMdDistillationModelServer
+from .apps.fed_md_distillation_model_with_training_server import FedMdDistillationModelWithTrainingServer
 from .apps.fed_md_params_share_csd_server import FedMdParamsShareCsdServer
 from .apps.fed_md_params_share_server import FedMdParamsShareServer
-from .apps.fed_md_public_distillation_server import FedMdPublicDistillationServer
 from .apps.fed_md_weighted_avg_server import FedMdWeightedAvgServer
 
 
@@ -37,12 +37,11 @@ def server_fn(context: Context) -> ServerAppComponents:
   if server_name == "fed-avg-server":
     net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     return FedAvgServer.create_server(net, use_wandb, context.run_config, server_device, num_rounds, testloader)
-  elif server_name == "fed-kd-avg-server":
+  elif server_name == "fed-md-avg-server":
     return FedMdAvgServer.create_server(use_wandb, context.run_config, num_rounds)
-  elif server_name == "fed-kd-weighted-avg-server":
+  elif server_name == "fed-md-weighted-avg-server":
     return FedMdWeightedAvgServer.create_server(use_wandb, context.run_config, num_rounds)
-  elif server_name == "fed-kd-distillation-model-server":
-    # Create server-side model and public data loader here
+  elif server_name == "fed-md-distillation-model-server":
     server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     public_data_loader = load_public_data(data_loader_config)
 
@@ -54,12 +53,11 @@ def server_fn(context: Context) -> ServerAppComponents:
       run_config=context.run_config,
       num_rounds=num_rounds,
     )
-  elif server_name == "fed-kd-public-distillation-server":
-    # Create server-side model and public data loader for public data pre-training
+  elif server_name == "fed-md-distillation-model-with-training-server":
     server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     public_data_loader = load_public_data(data_loader_config)
 
-    return FedMdPublicDistillationServer.create_server(
+    return FedMdDistillationModelWithTrainingServer.create_server(
       server_model=server_model,
       public_data_loader=public_data_loader,
       server_device=server_device,
@@ -67,8 +65,7 @@ def server_fn(context: Context) -> ServerAppComponents:
       run_config=context.run_config,
       num_rounds=num_rounds,
     )
-  elif server_name == "fed-kd-params-share-server":
-    # Create server-side model and public data loader for parameter aggregation and logit generation
+  elif server_name == "fed-md-params-share-server":
     server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     public_data_loader = load_public_data(data_loader_config)
 
@@ -80,7 +77,7 @@ def server_fn(context: Context) -> ServerAppComponents:
       run_config=context.run_config,
       num_rounds=num_rounds,
     )
-  elif server_name == "fed-kd-params-share-csd-server":
+  elif server_name == "fed-md-params-share-csd-server":
     server_model = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=True)
     public_data_loader = load_public_data(data_loader_config)
 

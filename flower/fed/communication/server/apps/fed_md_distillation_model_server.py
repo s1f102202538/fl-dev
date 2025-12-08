@@ -34,7 +34,7 @@ class FedMdDistillationModelServer:
     server_model.to(server_device)
 
     # Create strategy with server model and public data
-    strategy = FedKDDistillationModel(
+    strategy = FedMdDistillationModel(
       server_model=server_model,
       public_data_loader=public_data_loader,
       run_config=run_config,

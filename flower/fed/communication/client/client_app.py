@@ -21,7 +21,6 @@ def client_fn(context: Context) -> Client:
   partition_id = int(context.node_config["partition-id"])
   num_partitions = int(context.node_config["num-partitions"])
 
-  # MOONパラメータ（オプション）
   out_dim = int(context.run_config.get("out_dim", 256))
   n_classes = int(context.run_config.get("n_classes", 10))
   use_projection_head = bool(context.run_config.get("use_projection_head", True))
@@ -33,12 +32,12 @@ def client_fn(context: Context) -> Client:
     net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=use_projection_head)
 
     return FedAvgClient(net, context.state, train_loader, val_loader, local_epochs).to_client()
-  elif client_name == "fed-kd-client":
+  elif client_name == "fed-md-client":
     net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=use_projection_head)
     public_test_data = load_public_data(data_loader_config)
 
     return FedMdClient(net, context.state, train_loader, val_loader, public_test_data, local_epochs).to_client()
-  elif client_name == "fed-kd-params-share-client":
+  elif client_name == "fed-md-params-share-client":
     net = create_model(model_name, is_moon=True, out_dim=out_dim, n_classes=n_classes, use_projection_head=use_projection_head)
     public_test_data = load_public_data(data_loader_config)
 

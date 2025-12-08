@@ -22,7 +22,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 
-class FedMdPublicDistillation(Strategy):
+class FedMdDistillationModelWithTraining(Strategy):
   """Federated Model Distillation strategy with public data pre-training.
 
   This strategy performs knowledge distillation with a two-phase approach:

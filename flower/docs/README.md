@@ -104,7 +104,7 @@ flower/
 
 - **client_app.py**: クライアントのルーティングハブ
   - client_name に基づいて適切なクライアントアプリを起動
-  - 対応クライアント: fed-kd-client, fed-kd-params-share-client, fed-moon-client, fed-moon-params-share-client, fed-moon-params-share-csd-client
+  - 対応クライアント: fed-md-client, fed-md-params-share-client, fed-moon-client, fed-moon-params-share-client, fed-moon-params-share-csd-client
 
 - **apps/**: 各クライアント実装
   - **fed_kd_params_share_client.py**: パラメータ共有 + ロジット送信クライアント
@@ -115,7 +115,7 @@ flower/
 
 - **server_app.py**: サーバのルーティングハブ
   - server_name に基づいて適切なサーバアプリと戦略を起動
-  - 対応サーバ: fed-avg-server, fed-kd-params-share-server, fed-kd-params-share-csd-server
+  - 対応サーバ: fed-avg-server, fed-md-params-share-server, fed-md-params-share-csd-server
 
 - **strategy/**: 集約戦略
   - **fed_avg.py**: FedAvg（標準的な連合平均化）
@@ -198,7 +198,7 @@ flwr run .
 model_name = "mini-cnn"              # モデル選択
 dataset_name = "uoft-cs/cifar10"     # データセット選択
 client_name = "fed-moon-params-share-client"  # クライアント選択
-server_name = "fed-kd-params-share-server"    # サーバ選択
+server_name = "fed-md-params-share-server"    # サーバ選択
 num_clients = 10                     # クライアント数
 num_rounds = 50                      # ラウンド数
 ```
