@@ -31,22 +31,39 @@ y_data2 = [
   66.68346774193549,
 ]
 y_data3 = [
-  59.657258064516135,
-  65.51411290322581,
-  65.91733870967742,
-  66.27016129032258,
-  64.79838709677419,
-  65.13104838709677,
-  65.60483870967742,
-  65.1008064516129,
-  64.375,
-  64.92943548387098,
+  63.840725806451616,
+  66.34072580645162,
+  67.15725806451613,
+  66.54233870967742,
+  66.93548387096773,
+  66.90524193548387,
+  66.98588709677419,
+  67.0866935483871,
+  66.65322580645162,
+  67.17741935483872,
+]
+y_data4 = [
+  60.70564516129033,
+  65.53427419354838,
+  66.68346774193549,
+  66.67338709677419,
+  66.51209677419355,
+  66.11895161290323,
+  66.21975806451613,
+  65.44354838709677,
+  66.13911290322581,
+  65.54435483870968,
 ]
 
 x_label = "Round"
 y_label = "Accuracy [%]"
 title = "Impact of each component on model accuracy"
-legend_labels = ["Baseline + Params Share + Logit Calibration (Full)", "Baseline + Params Share (Params Share)", "MOON + Logit Share (Baseline)"]
+legend_labels = [
+  "Baseline + Params Share + Logit Calibration (Full)",
+  "Baseline + Params Share (Params Share)",
+  "Baseline + Logit Calibration (Logit Calibration)",
+  "MOON + Logit Share (Baseline)",
+]
 
 
 def plot_line_graph():
@@ -58,6 +75,8 @@ def plot_line_graph():
     plt.plot(x_data, y_data2, marker="s", label=legend_labels[1], linewidth=2)
   if y_data3:
     plt.plot(x_data, y_data3, marker="^", label=legend_labels[2], linewidth=2)
+  if y_data4:
+    plt.plot(x_data, y_data4, marker="p", label=legend_labels[3], linewidth=2)
 
   plt.xlabel(x_label)
   plt.ylabel(y_label)

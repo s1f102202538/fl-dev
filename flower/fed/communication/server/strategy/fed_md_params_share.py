@@ -102,23 +102,35 @@ class FedMdParamsShare(Strategy):
     print(f"[W&B] Initialized project: {wandb_project_name}")
 
   def _aggregate_logits(self, client_logits_list: List[List[Tensor]], weights: List[int]) -> List[Tensor]:
-    num_clients = len(client_logits_list)
-    num_batches = len(client_logits_list[0])
+    if not client_logits_list:
+      return []
 
-    aggregated = []
-    for batch_idx in range(num_batches):
-      batch_sum = None
-      for client_logits in client_logits_list:
-        if batch_idx < len(client_logits):
-          if batch_sum is None:
-            batch_sum = client_logits[batch_idx]
-          else:
-            batch_sum = batch_sum + client_logits[batch_idx]
-      if batch_sum is not None:
-        # Simple average: divide by number of clients
-        aggregated.append(batch_sum / num_clients)
+    # 全クライアントで共通するバッチ数を決定
+    min_batches = min(len(batches) for batches in client_logits_list)
+    max_batches = max(len(batches) for batches in client_logits_list)
 
-    return aggregated
+    if min_batches != max_batches:
+      print(f"[FedKD-ParamsShare] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
+
+    aggregated_batches = []
+
+    # 各バッチを個別に処理（重み無し）
+    for batch_idx in range(min_batches):
+      batch_logits = []
+
+      # このバッチの全クライアントロジットを収集
+      for client_idx, client_batches in enumerate(client_logits_list):
+        if batch_idx < len(client_batches):
+          batch_logits.append(client_batches[batch_idx])
+
+      if batch_logits:
+        # 単純な算術平均を計算
+        stacked_logits = torch.stack(batch_logits)
+        averaged_logits = torch.mean(stacked_logits, dim=0)
+        aggregated_batches.append(averaged_logits)
+
+    print(f"[FedKD-ParamsShare] Successfully aggregated {len(aggregated_batches)} batches using simple average (no weights)")
+    return aggregated_batches
 
   def _distill_server_model(self, server_round: int) -> None:
     distillation = Distillation(
