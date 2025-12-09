@@ -110,7 +110,7 @@ class FedMdParamsShare(Strategy):
     max_batches = max(len(batches) for batches in client_logits_list)
 
     if min_batches != max_batches:
-      print(f"[FedKD-ParamsShare] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
+      print(f"[Server] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
 
     aggregated_batches = []
 
@@ -129,7 +129,7 @@ class FedMdParamsShare(Strategy):
         averaged_logits = torch.mean(stacked_logits, dim=0)
         aggregated_batches.append(averaged_logits)
 
-    print(f"[FedKD-ParamsShare] Successfully aggregated {len(aggregated_batches)} batches using simple average (no weights)")
+    print(f"[Server] Successfully aggregated {len(aggregated_batches)} batches using simple average")
     return aggregated_batches
 
   def _distill_server_model(self, server_round: int) -> None:
@@ -147,7 +147,7 @@ class FedMdParamsShare(Strategy):
       beta=0.3,
       device=self.device,
     )
-    print(f"[FedKD-ParamsShare] Round {server_round}: Server model distillation completed")
+    print(f"[Server] Round {server_round}: Server model distillation completed")
 
   def store_results_and_log(self, server_round: int, tag: str, results_dict: Dict) -> None:
     # Store results
@@ -166,7 +166,7 @@ class FedMdParamsShare(Strategy):
   @override
   def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
     """Initialize global model parameters to send to clients."""
-    print("[FedKD-ParamsShare] Initializing server model parameters")
+    print("[Server] Initializing server model parameters")
 
     # Return initial model parameters
     initial_parameters = self.initial_parameters
@@ -178,7 +178,7 @@ class FedMdParamsShare(Strategy):
         first_layer_mean = float(initial_ndarrays[0].mean())
         first_layer_std = float(initial_ndarrays[0].std())
         first_layer_sum = float(initial_ndarrays[0].sum())
-        print(f"[FedKD-ParamsShare] INITIAL parameters - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}")
+        print(f"[Server] Initial parameters - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}")
 
     self.initial_parameters = None
     return initial_parameters
@@ -206,14 +206,14 @@ class FedMdParamsShare(Strategy):
     if server_round == 1:
       # Round 1: Initial parameter distribution (not counted)
       self.communication_costs["server_to_client_params_mb"].append(0.0)
-      print(f"[FedKD-ParamsShare] Round {server_round}: Sending initial model parameters to {len(clients)} clients (not counted in communication cost)")
+      print(f"[Server] Round {server_round}: Sending initial model parameters to {len(clients)} clients (not counted in communication cost)")
     else:
       # Round 2+: Count parameter distribution
       params_size_mb = calculate_communication_cost(parameters)["size_mb"]
       total_params_size_mb = params_size_mb * len(clients)
       self.communication_costs["server_to_client_params_mb"].append(total_params_size_mb)
       print(
-        f"[FedKD-ParamsShare] Round {server_round}: Sending model parameters to {len(clients)} clients (size: {params_size_mb:.4f} MB per client, total: {total_params_size_mb:.4f} MB)"
+        f"[Server] Round {server_round}: Sending model parameters to {len(clients)} clients (size: {params_size_mb:.4f} MB per client, total: {total_params_size_mb:.4f} MB)"
       )
 
     # Return client/config pairs
@@ -251,7 +251,7 @@ class FedMdParamsShare(Strategy):
         client_weights.append(fit_res.num_examples)
 
     if not client_logits_list:
-      print(f"[FedKD-ParamsShare] Round {server_round}: No logits received from clients")
+      print(f"[Server] Round {server_round}: No logits received from clients")
       return None, {}
 
     # Calculate communication costs
@@ -263,13 +263,13 @@ class FedMdParamsShare(Strategy):
     self.communication_costs["total_round_mb"].append(total_size_mb)
 
     if server_round == 1:
-      print(f"[FedKD-ParamsShare] Round {server_round}: Client->Server logits: {total_logits_mb:.4f} MB (initial params excluded)")
+      print(f"[Server] Round {server_round}: Client->Server logits: {total_logits_mb:.4f} MB (initial params excluded)")
     else:
       print(
-        f"[FedKD-ParamsShare] Round {server_round}: Server->Client params: {server_to_client_params_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_size_mb:.4f} MB"
+        f"[Server] Round {server_round}: Server->Client params: {server_to_client_params_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_size_mb:.4f} MB"
       )  # Aggregate logits using weighted average
     self.aggregated_logits = self._aggregate_logits(client_logits_list, client_weights)
-    print(f"[FedKD-ParamsShare] Round {server_round}: Aggregated {len(self.aggregated_logits)} logit batches from {len(client_logits_list)} clients")
+    print(f"[Server] Round {server_round}: Aggregated {len(self.aggregated_logits)} logit batches from {len(client_logits_list)} clients")
 
     # Perform knowledge distillation on server model using aggregated logits
     self._distill_server_model(server_round)
@@ -282,7 +282,7 @@ class FedMdParamsShare(Strategy):
     first_layer_std = float(updated_ndarrays[0].std())
     first_layer_sum = float(updated_ndarrays[0].sum())
     print(
-      f"[FedKD-ParamsShare] Round {server_round}: Server model after distillation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
+      f"[Server] Round {server_round}: Server model after distillation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
     )
 
     # Aggregate custom metrics if aggregation function is provided
@@ -319,7 +319,7 @@ class FedMdParamsShare(Strategy):
     first_layer_std = float(ndarrays[0].std())
     first_layer_sum = float(ndarrays[0].sum())
     print(
-      f"[FedKD-ParamsShare] Round {server_round}: Sending server model parameters for evaluation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
+      f"[Server] Round {server_round}: Sending server model parameters for evaluation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
     )
 
     evaluate_ins = EvaluateIns(parameters, config)
@@ -354,7 +354,7 @@ class FedMdParamsShare(Strategy):
     # Log accuracy information
     if "accuracy" in metrics_aggregated:
       accuracy = metrics_aggregated["accuracy"]
-      print(f"[FedKD-ParamsShare] Round {server_round}: Federated evaluation accuracy: {accuracy:.4f}")
+      print(f"[Server] Round {server_round}: Federated evaluation accuracy: {accuracy:.4f}")
 
     # Store and log results
     self.store_results_and_log(server_round, "federated_evaluate", {"federated_evaluate_loss": loss_aggregated, **metrics_aggregated})

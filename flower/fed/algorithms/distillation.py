@@ -154,19 +154,17 @@ class Distillation:
         # debug print for first batch only (helps verifying distributions quickly)
         if debug_print_first_batch and epoch == 0 and batch_idx == 0:
           try:
-            print("=== Distillation debug (epoch 1, batch 1) ===")
-            print(f"teacher_probs sum (first 5): {teacher_probs.sum(dim=1)[:5].cpu().numpy()}")
+            print("[Distillation] === Debug (Epoch 1, Batch 1) ===")
+            print(f"[Distillation] Teacher probs sum (first 5): {teacher_probs.sum(dim=1)[:5].cpu().numpy()}")
             print(
-              f"teacher_probs stats: mean={teacher_probs.mean().item():.6f}, std={teacher_probs.std().item():.6f}, min={teacher_probs.min().item():.6f}, max={teacher_probs.max().item():.6f}"
+              f"[Distillation] Teacher probs stats: mean={teacher_probs.mean().item():.6f}, std={teacher_probs.std().item():.6f}, min={teacher_probs.min().item():.6f}, max={teacher_probs.max().item():.6f}"
             )
             print(
-              f"student_logits stats: mean={student_logits.mean().item():.6f}, std={student_logits.std().item():.6f}, min={student_logits.min().item():.6f}, max={student_logits.max().item():.6f}"
+              f"[Distillation] Student logits stats: mean={student_logits.mean().item():.6f}, std={student_logits.std().item():.6f}, min={student_logits.min().item():.6f}, max={student_logits.max().item():.6f}"
             )
-            print("=============================================")
+            print("[Distillation] ============================================")
           except Exception:
-            # 保険: データが GPU 上、numpy に変換できない等のケースで落ちないようにする
             pass
-          # only print once
           debug_print_first_batch = False
 
       # end batches
@@ -174,13 +172,13 @@ class Distillation:
       if batch_count > 0:
         epoch_loss = running_loss / batch_count
         scheduler.step(epoch_loss)
-        print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
+        print(f"[Distillation] Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
 
         should_stop, best_loss, patience_counter = self._check_early_stopping(epoch_loss, best_loss, patience_counter, early_stopping_patience)
         if should_stop:
-          print(f"Early stopping at epoch {epoch + 1}/{epochs}")
+          print(f"[Distillation] Early stopping at epoch {epoch + 1}/{epochs}")
           break
       else:
-        print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}: No valid batches processed")
+        print(f"[Distillation] Epoch {epoch + 1}/{epochs}: No valid batches processed")
 
     return self.studentModel

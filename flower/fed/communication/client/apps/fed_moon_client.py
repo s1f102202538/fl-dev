@@ -80,7 +80,7 @@ class FedMoonClient(NumPyClient):
 
     filtered_logits = self._generate_and_filter_logits()
 
-    print(f"Client training loss: {train_loss:.4f}")
+    print(f"[Client] Training loss: {train_loss:.4f}")
 
     return (
       [],  # Empty list for logit-only sharing (no parameter aggregation)
@@ -95,9 +95,9 @@ class FedMoonClient(NumPyClient):
     """Load the model from the previous training round."""
     previous_round_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     if previous_round_model is not None:
-      print("[DEBUG] Previous round model loaded successfully")
+      print("[Client] Previous round model loaded successfully")
     else:
-      print("[DEBUG] No previous model found, using initial model")
+      print("[Client] No previous model found, using initial model")
     return previous_round_model
 
   def _perform_knowledge_distillation(self, avg_logits: str, temperature: float) -> None:
@@ -107,10 +107,10 @@ class FedMoonClient(NumPyClient):
     global_model_for_distillation = load_model_from_state(self.client_state, self.net, self.global_model_name)
     if global_model_for_distillation is not None:
       distillation_base_model = global_model_for_distillation
-      print("[DEBUG] Using saved global model for knowledge distillation")
+      print("[Client] Using saved global model for knowledge distillation")
     else:
       distillation_base_model = copy.deepcopy(self.net)
-      print("[DEBUG] No saved global model found, using current model for distillation")
+      print("[Client] No saved global model found, using current model for distillation")
 
     logits = base64_to_batch_list(avg_logits)
 
@@ -136,7 +136,7 @@ class FedMoonClient(NumPyClient):
 
     # Save distilled model as global model
     save_model_to_state(self.virtual_global_model, self.client_state, self.global_model_name)
-    print("[DEBUG] Distilled model saved as global model")
+    print("[Client] Distilled model saved as global model")
 
   def _update_model_history(self, previous_round_model: BaseModel) -> None:
     """Update model history for MOON contrastive learning."""
@@ -145,13 +145,13 @@ class FedMoonClient(NumPyClient):
 
     # MOON対比学習の設定
     self.moon_learner.update_models(previous_round_model, self.virtual_global_model)
-    print("Updated Moon learner with 1 previous model and virtual global model")
+    print("[Client] Updated MOON learner with previous model and virtual global model")
 
   def _perform_training(self) -> float:
     """Perform training using normal or MOON approach based on available model history."""
     # MOON学習が可能かチェック
     if self.moon_learner.previous_model is not None and self.moon_learner.global_model is not None:
-      print("[INFO] Performing MOON training with previous model")
+      print("[Client] Performing MOON training with previous model")
       return self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
@@ -160,7 +160,7 @@ class FedMoonClient(NumPyClient):
         args_optimizer="sgd",  # Original paper settings
       )
     else:
-      print("[INFO] No previous model available, performing normal training")
+      print("[Client] No previous model available, performing normal training")
       return CNNTask.train(
         net=self.net,
         train_loader=self.train_loader,
@@ -170,10 +170,8 @@ class FedMoonClient(NumPyClient):
       )
 
   def _generate_and_filter_logits(self) -> list:
-    """Generate and calibrate logits for sharing with server without quality filtering."""
-
     logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    print(f"[DEBUG] logits generated: {len(logits)} batches")
+    print(f"[Client] Generated {len(logits)} logit batches")
 
     return logits
 
@@ -184,16 +182,16 @@ class FedMoonClient(NumPyClient):
     # 蒸留済みグローバルモデルを評価
     loaded_global_model = load_model_from_state(self.client_state, self.net, self.global_model_name)
     if loaded_global_model is not None:
-      print(f"[INFO] Evaluating global model from round {current_round - 1}")
+      print(f"[Client] Evaluating global model from round {current_round - 1}")
       loss, accuracy = CNNTask.test(loaded_global_model, self.val_loader, device=self.device)
-      print(f"[INFO] Global model accuracy: {accuracy:.2f}%")
+      print(f"[Client] Global model accuracy: {accuracy:.2f}%")
       return (
         loss,
         len(self.val_loader.dataset),  # type: ignore
         {"accuracy": accuracy},
       )
     else:
-      print("[WARNING] No saved global model found")
+      print("[Client] Warning: No saved global model found")
       return (
         0.0,
         len(self.val_loader.dataset),  # type: ignore

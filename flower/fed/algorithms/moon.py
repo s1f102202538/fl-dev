@@ -82,7 +82,7 @@ class MoonContrastiveLearning:
 
     # NaN/Inf check
     if torch.isnan(logits).any() or torch.isinf(logits).any():
-      print("Warning: NaN/Inf detected in logits. Returning zero tensor.")
+      print("[MOON] Warning: NaN/Inf detected in contrastive logits. Returning zero loss.")
       return torch.tensor(0.0, device=self.device, requires_grad=True)
 
     # ラベル：正例が0番目
@@ -155,13 +155,11 @@ class MoonTrainer:
 
         # NaN detection and handling
         if torch.isnan(total_loss) or torch.isinf(total_loss):
-          print(f"Warning: Loss became NaN/Inf. loss1={loss1.item()}, loss2={loss2.item()}")
-          continue  # Skip this batch
+          print(f"[MOON] Warning: Loss became NaN/Inf. CE Loss={loss1.item():.4f}, Contrastive Loss={loss2.item():.4f}. Skipping batch.")
+          continue
 
         total_loss.backward()
-
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
         optimizer.step()
 
         running_loss += total_loss.item()

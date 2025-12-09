@@ -94,7 +94,7 @@ class FedMdDistillationModel(Strategy):
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
     wandb_project_name = os.getenv("WANDB_PROJECT_NAME", "federated-learning-default")
-    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedKD")
+    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedMD")
 
   def _store_results(self, tag: str, results_dict: Dict) -> None:
     """Store results in dictionary, then save as JSON."""
@@ -124,7 +124,7 @@ class FedMdDistillationModel(Strategy):
     if not logits_batch_lists:
       return []
 
-    print("[FedKD-Server] Using simple averaging for logit aggregation")
+    print("[Server] Using simple averaging for logit aggregation")
 
     # Get the number of batches (assuming all clients have the same number of batches)
     num_batches = len(logits_batch_lists[0])
@@ -132,7 +132,7 @@ class FedMdDistillationModel(Strategy):
     # Check that all clients have the same number of batches
     for i, client_logits in enumerate(logits_batch_lists):
       if len(client_logits) != num_batches:
-        print(f"[FedKD-Server] WARNING: Client {i} has {len(client_logits)} batches, expected {num_batches}")
+        print(f"[Server] WARNING: Client {i} has {len(client_logits)} batches, expected {num_batches}")
 
     aggregated_logits = []
 
@@ -151,25 +151,25 @@ class FedMdDistillationModel(Strategy):
         aggregated_batch = torch.mean(stacked_logits, dim=0)
         aggregated_logits.append(aggregated_batch)
 
-    print(f"[FedKD-Server] Aggregated {len(aggregated_logits)} batches using simple averaging")
+    print(f"[Server] Aggregated {len(aggregated_logits)} batches using simple averaging")
     return aggregated_logits
 
   def _train_server_model_with_aggregated_logits(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float], server_round: int) -> None:
     if not logits_batch_lists:
-      print(f"[FedKD-Server] Round {server_round}: No client logits available for server training")
+      print(f"[Server] Round {server_round}: No client logits available for server training")
       return
 
     total_clients = len(logits_batch_lists)
-    print(f"[FedKD-Server] Round {server_round}: Aggregating logits from {total_clients} clients for server training")
+    print(f"[Server] Round {server_round}: Aggregating logits from {total_clients} clients for server training")
 
     # Aggregate client logits using weighted averaging
     aggregated_logits = self._aggregate_client_logits(logits_batch_lists, client_weights)
 
     if not aggregated_logits:
-      print(f"[FedKD-Server] Round {server_round}: No aggregated logits available for server training")
+      print(f"[Server] Round {server_round}: No aggregated logits available for server training")
       return
 
-    print(f"[FedKD-Server] Round {server_round}: Training server model with {len(aggregated_logits)} aggregated logit batches")
+    print(f"[Server] Round {server_round}: Training server model with {len(aggregated_logits)} aggregated logit batches")
 
     # Create distillation trainer with aggregated logits
     distillation = Distillation(
@@ -189,38 +189,38 @@ class FedMdDistillationModel(Strategy):
     )
 
     print(
-      f"[FedKD-Server] Round {server_round}: Server model training completed with aggregated logits ({self.server_training_epochs} epochs, lr: {self.server_learning_rate:.4f})"
+      f"[Server] Round {server_round}: Server model training completed with aggregated logits ({self.server_training_epochs} epochs, lr: {self.server_learning_rate:.4f})"
     )
 
   def _generate_server_logits(self, server_round: int) -> List[Tensor]:
-    print(f"[FedKD-Server] Round {server_round}: Generating logits from trained server model")
+    print(f"[Server] Round {server_round}: Generating logits from trained server model")
 
     # Generate logits using trained server model
     server_logits = CNNTask.inference(self.server_model, self.public_data_loader, device=self.device)
 
-    print(f"[FedKD-Server] Round {server_round}: Generated {len(server_logits)} server logit batches")
+    print(f"[Server] Round {server_round}: Generated {len(server_logits)} server logit batches")
 
     return server_logits
 
   def _save_server_model_state(self, server_round: int) -> None:
-    print(f"[FedKD-Server] Round {server_round}: Saving server model state for next round")
+    print(f"[Server] Round {server_round}: Saving server model state for next round")
 
     # Deep copy of the current state to avoid reference issues
     self.saved_server_model_state = copy.deepcopy(self.server_model.state_dict())
 
-    print(f"[FedKD-Server] Round {server_round}: Server model state saved successfully")
+    print(f"[Server] Round {server_round}: Server model state saved successfully")
 
   def _restore_server_model_state(self, server_round: int) -> None:
     if server_round == 1:
-      print(f"[FedKD-Server] Round {server_round}: First round - using initial server model state")
+      print(f"[Server] Round {server_round}: First round - using initial server model state")
       return
 
     if self.saved_server_model_state is not None:
-      print(f"[FedKD-Server] Round {server_round}: Restoring server model state from previous round")
+      print(f"[Server] Round {server_round}: Restoring server model state from previous round")
       self.server_model.load_state_dict(self.saved_server_model_state)
-      print(f"[FedKD-Server] Round {server_round}: Server model state restored successfully")
+      print(f"[Server] Round {server_round}: Server model state restored successfully")
     else:
-      print(f"[FedKD-Server] Round {server_round}: WARNING - No saved state found, using current model state")
+      print(f"[Server] Round {server_round}: WARNING - No saved state found, using current model state")
 
   @override
   def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
@@ -261,13 +261,13 @@ class FedMdDistillationModel(Strategy):
       # 現在の温度をクライアントに送信
       config["temperature"] = self.kd_temperature
       print(
-        f"[FedKD-Server] Round {server_round}: Sending {len(self.server_generated_logits)} server-generated logit batches to clients (temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)"
+        f"[Server] Round {server_round}: Sending {len(self.server_generated_logits)} server-generated logit batches to clients (temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)"
       )
     else:
       if server_round == 1:
-        print("[FedKD-Server] Round 1: No server logits available yet, clients will perform local training")
+        print("[Server] Round 1: No server logits available yet, clients will perform local training")
       else:
-        print(f"[FedKD-Server] Round {server_round}: No server logits available for this round")
+        print(f"[Server] Round {server_round}: No server logits available for this round")
 
     # 有効になっているクライアントの取得
     sample_size = int(self.fraction_fit * client_manager.num_available())
@@ -277,7 +277,7 @@ class FedMdDistillationModel(Strategy):
     total_server_to_client_mb = server_to_client_mb * len(clients)
     self.communication_costs["server_to_client_logits_mb"].append(total_server_to_client_mb)
 
-    print(f"[FedKD-Server] Round {server_round}: Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
+    print(f"[Server] Round {server_round}: Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
 
     fit_ins = FitIns(parameters, config)
     return [(client, fit_ins) for client in clients]
@@ -316,7 +316,7 @@ class FedMdDistillationModel(Strategy):
         client_weights.append(float(fit_res.num_examples))
 
     if logits_batch_lists and client_weights:
-      print(f"[FedKD-Server] Round {server_round}: Processing logits from {len(logits_batch_lists)} clients for aggregated training")
+      print(f"[Server] Round {server_round}: Processing logits from {len(logits_batch_lists)} clients for aggregated training")
 
       # Train server model with aggregated client logits
       self._train_server_model_with_aggregated_logits(logits_batch_lists, client_weights, server_round)
@@ -327,7 +327,7 @@ class FedMdDistillationModel(Strategy):
       # Save server model state after training for next round
       self._save_server_model_state(server_round)
     else:
-      print(f"[FedKD-Server] Round {server_round}: No valid logits received from clients")
+      print(f"[Server] Round {server_round}: No valid logits received from clients")
 
     # 通信コストを記録
     self.communication_costs["client_to_server_logits_mb"].append(total_logits_mb)
@@ -338,7 +338,7 @@ class FedMdDistillationModel(Strategy):
     self.communication_costs["total_round_mb"].append(total_round_mb)
 
     print(
-      f"[FedKD-Server] Round {server_round}: Server->Client: {server_to_client_logits_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
+      f"[Server] Round {server_round}: Server->Client: {server_to_client_logits_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
     )
 
     # メトリクスの集約
@@ -406,9 +406,9 @@ class FedMdDistillationModel(Strategy):
     if self.server_model is not None:
       ndarrays = [val.cpu().numpy() for _, val in self.server_model.state_dict().items()]
       parameters = ndarrays_to_parameters(ndarrays)
-      print(f"[FedKD-DistillationModel] Round {server_round}: Sending server model parameters to clients for evaluation")
+      print(f"[Server] Round {server_round}: Sending server model parameters to clients for evaluation")
     else:
-      print(f"[FedKD-DistillationModel] Round {server_round}: No server model available, using provided parameters")
+      print(f"[Server] Round {server_round}: No server model available, using provided parameters")
 
     # 初回ラウンドではロジットが存在しないため、avg_logitsキーを含めない
     evaluate_ins = EvaluateIns(parameters, config)
@@ -471,7 +471,7 @@ class FedMdDistillationModel(Strategy):
     # 精度情報のログ出力
     if "accuracy" in metrics_aggregated:
       accuracy = metrics_aggregated["accuracy"]
-      print(f"[FedKD-Server] Round {server_round} - Accuracy: {accuracy:.4f}, Loss: {loss_aggregated:.4f}")
+      print(f"[Server] Round {server_round} - Accuracy: {accuracy:.4f}, Loss: {loss_aggregated:.4f}")
 
     # Store and log FedKD evaluation results
     self.store_results_and_log(

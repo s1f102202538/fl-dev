@@ -18,14 +18,6 @@ from torch import Tensor
 
 
 class FedMdAvg(Strategy):
-  """Federated Model Distillation with Simple Average Logit Aggregation strategy.
-
-  This strategy performs knowledge distillation using simple average aggregation of client logits.
-  Key features:
-  - Simple average aggregation of client logits
-  - Temperature-scaled knowledge distillation
-  """
-
   def __init__(
     self,
     *,
@@ -42,7 +34,6 @@ class FedMdAvg(Strategy):
     evaluate_metrics_aggregation_fn: Optional[MetricsAggregationFn] = None,
     run_config: UserConfig,
     use_wandb: bool = False,
-    # Simplified logit filtering parameters
     kd_temperature: float = 3.0,  # 知識蒸留用温度
   ) -> None:
     self.fraction_fit = fraction_fit
@@ -107,15 +98,6 @@ class FedMdAvg(Strategy):
       wandb.log(results_dict, step=server_round)
 
   def _simple_average_logit_aggregation(self, logits_batch_lists: List[List[Tensor]], client_weights: List[float]) -> List[Tensor]:
-    """単純な算術平均によるロジット集約（重み無し）
-
-    Args:
-        logits_batch_lists: クライアントからのロジットバッチリスト
-        client_weights: クライアントの重み（未使用、互換性のために保持）
-
-    Returns:
-        算術平均で集約されたロジットリスト
-    """
     if not logits_batch_lists:
       return []
 
@@ -124,7 +106,7 @@ class FedMdAvg(Strategy):
     max_batches = max(len(batches) for batches in logits_batch_lists)
 
     if min_batches != max_batches:
-      print(f"[FedKD-SA] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
+      print(f"[Server] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
 
     aggregated_batches = []
 
@@ -143,7 +125,7 @@ class FedMdAvg(Strategy):
         averaged_logits = torch.mean(stacked_logits, dim=0)
         aggregated_batches.append(averaged_logits)
 
-    print(f"[FedKD-SA] Successfully aggregated {len(aggregated_batches)} batches using simple average (no weights, no filtering)")
+    print(f"[Server] Successfully aggregated {len(aggregated_batches)} batches using simple average")
     return aggregated_batches
 
   @override
@@ -187,9 +169,9 @@ class FedMdAvg(Strategy):
       server_to_client_mb = calculate_data_size_mb(logits_data)
       # 固定温度をクライアントに送信
       config["temperature"] = self.kd_temperature
-      print(f"[FedKD] Sending {len(aggregated_logits)} aggregated logit batches (KD temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)")
+      print(f"[Server] Sending {len(aggregated_logits)} aggregated logit batches (KD temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)")
     else:
-      print("[FedKD] No logits available for this round")
+      print("[Server] No logits available for this round")
 
     # 有効になっているクライアントの取得
     sample_size = int(self.fraction_fit * client_manager.num_available())
@@ -199,7 +181,7 @@ class FedMdAvg(Strategy):
     total_server_to_client_mb = server_to_client_mb * len(clients)
     self.communication_costs["server_to_client_logits_mb"].append(total_server_to_client_mb)
 
-    print(f"[FedKD] Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
+    print(f"[Server] Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
 
     fit_ins = FitIns(parameters, config)
     return [(client, fit_ins) for client in clients]
@@ -235,14 +217,14 @@ class FedMdAvg(Strategy):
         client_weights.append(float(fit_res.num_examples))
 
     if logits_batch_lists and client_weights:
-      print(f"[FedKD] Aggregating logits from {len(logits_batch_lists)} clients")
+      print(f"[Server] Aggregating logits from {len(logits_batch_lists)} clients")
 
       # 現在のラウンドのロジット集約を実行
       self.avg_logits = self._simple_average_logit_aggregation(logits_batch_lists, client_weights)
 
-      print(f"[FedKD] Successfully aggregated {len(self.avg_logits)} batches using simple average aggregation")
+      print(f"[Server] Successfully aggregated {len(self.avg_logits)} batches using simple average aggregation")
     else:
-      print("[FedKD] No valid logits received from clients")
+      print("[Server] No valid logits received from clients")
 
     # 通信コストを記録
     self.communication_costs["client_to_server_logits_mb"].append(total_logits_mb)
@@ -253,7 +235,7 @@ class FedMdAvg(Strategy):
     self.communication_costs["total_round_mb"].append(total_round_mb)
 
     print(
-      f"[FedKD] Round {server_round}: Server->Client: {server_to_client_logits_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
+      f"[Server] Round {server_round}: Server->Client: {server_to_client_logits_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
     )
 
     # メトリクスの集約
@@ -377,7 +359,7 @@ class FedMdAvg(Strategy):
     # 精度情報のログ出力
     if "accuracy" in metrics_aggregated:
       accuracy = metrics_aggregated["accuracy"]
-      print(f"[FedKD] Round {server_round} - Accuracy: {accuracy:.4f}, Loss: {loss_aggregated:.4f}")
+      print(f"[Server] Round {server_round} - Accuracy: {accuracy:.4f}, Loss: {loss_aggregated:.4f}")
 
     # Store and log FedKD evaluation results
     self.store_results_and_log(

@@ -80,7 +80,7 @@ class FedMdWeightedAvg(Strategy):
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
     wandb_project_name = os.getenv("WANDB_PROJECT_NAME", "federated-learning-default")
-    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedKD")
+    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedMD")
 
   def _store_results(self, tag: str, results_dict: Dict) -> None:
     """Store results in dictionary, then save as JSON."""
@@ -116,7 +116,7 @@ class FedMdWeightedAvg(Strategy):
     max_batches = max(len(batches) for batches in logits_batch_lists)
 
     if min_batches != max_batches:
-      print(f"[FedKD] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
+      print(f"[Server] Batch count mismatch across clients. Using {min_batches} batches (min: {min_batches}, max: {max_batches})")
 
     # 重みを正規化
     total_weight = sum(client_weights)
@@ -151,7 +151,7 @@ class FedMdWeightedAvg(Strategy):
 
         aggregated_batches.append(weighted_logits)
 
-    print(f"[FedKD] Successfully aggregated {len(aggregated_batches)} batches without quality filtering")
+    print(f"[Server] Successfully aggregated {len(aggregated_batches)} batches")
     return aggregated_batches
 
   def _manage_logit_history(self, new_logits: List[Tensor]) -> None:
@@ -188,7 +188,7 @@ class FedMdWeightedAvg(Strategy):
           else:
             enhanced_logits.append(curr_batch)
 
-        print(f"[FedKD] Applied temporal smoothing with {len(enhanced_logits)} batches")
+        print(f"[Server] Applied temporal smoothing with {len(enhanced_logits)} batches")
         return enhanced_logits
 
     return current_logits
@@ -234,9 +234,9 @@ class FedMdWeightedAvg(Strategy):
       server_to_client_mb = calculate_data_size_mb(logits_data)
       # 現在の温度をクライアントに送信
       config["temperature"] = self.kd_temperature
-      print(f"[FedKD] Sending {len(enhanced_logits)} enhanced logit batches to clients (temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)")
+      print(f"[Server] Sending {len(enhanced_logits)} enhanced logit batches to clients (temp: {self.kd_temperature:.3f}, size: {server_to_client_mb:.4f} MB)")
     else:
-      print("[FedKD] No logits available for this round")
+      print("[Server] No logits available for this round")
 
     # 有効になっているクライアントの取得
     sample_size = int(self.fraction_fit * client_manager.num_available())
@@ -246,7 +246,7 @@ class FedMdWeightedAvg(Strategy):
     total_server_to_client_mb = server_to_client_mb * len(clients)
     self.communication_costs["server_to_client_logits_mb"].append(total_server_to_client_mb)
 
-    print(f"[FedKD] Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
+    print(f"[Server] Total server->client communication: {total_server_to_client_mb:.4f} MB ({len(clients)} clients)")
 
     fit_ins = FitIns(parameters, config)
     return [(client, fit_ins) for client in clients]
@@ -283,7 +283,7 @@ class FedMdWeightedAvg(Strategy):
           if not torch.isnan(batch).any() and not torch.isinf(batch).any():
             filtered_batch_list.append(batch)
           else:
-            print("[FedKD] Skipped batch with NaN/Inf in logits from a client.")
+            print("[Server] Skipped batch with NaN/Inf in logits from a client.")
 
         if filtered_batch_list:
           logits_batch_lists.append(filtered_batch_list)
@@ -291,7 +291,7 @@ class FedMdWeightedAvg(Strategy):
           client_weights.append(float(fit_res.num_examples))
 
     if logits_batch_lists and client_weights:
-      print(f"[FedKD] Aggregating logits from {len(logits_batch_lists)} clients")
+      print(f"[Server] Aggregating logits from {len(logits_batch_lists)} clients")
 
       # 重み付きロジット集約を実行
       self.avg_logits = self._weighted_logit_aggregation(logits_batch_lists, client_weights)
@@ -299,9 +299,9 @@ class FedMdWeightedAvg(Strategy):
       # ロジット履歴を管理
       self._manage_logit_history(self.avg_logits)
 
-      print(f"[FedKD] Successfully aggregated {len(self.avg_logits)} batches of logits")
+      print(f"[Server] Successfully aggregated {len(self.avg_logits)} batches of logits")
     else:
-      print("[FedKD] No valid logits received from clients")
+      print("[Server] No valid logits received from clients")
 
     # 通信コストを記録
     self.communication_costs["client_to_server_logits_mb"].append(total_logits_mb)
@@ -312,7 +312,7 @@ class FedMdWeightedAvg(Strategy):
     self.communication_costs["total_round_mb"].append(total_round_mb)
 
     print(
-      f"[FedKD] Round {server_round}: Server->Client: {server_to_client_logits_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
+      f"[Server] Round {server_round}: Server->Client: {server_to_client_logits_mb:.4f} MB, Client->Server logits: {total_logits_mb:.4f} MB, total: {total_round_mb:.4f} MB"
     )
 
     # メトリクスの集約
@@ -441,7 +441,7 @@ class FedMdWeightedAvg(Strategy):
     # 精度情報のログ出力
     if "accuracy" in metrics_aggregated:
       accuracy = metrics_aggregated["accuracy"]
-      print(f"[FedKD] Round {server_round} - Accuracy: {accuracy:.4f}, Loss: {loss_aggregated:.4f}")
+      print(f"[Server] Round {server_round} - Accuracy: {accuracy:.4f}, Loss: {loss_aggregated:.4f}")
 
     # Store and log FedKD evaluation results
     self.store_results_and_log(

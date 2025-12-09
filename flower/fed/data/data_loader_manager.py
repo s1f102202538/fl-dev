@@ -27,7 +27,7 @@ class DataLoaderManager:
     if dataset_name in cls._preloading_done:
       return
 
-    print(f"Starting initial preload for dataset '{dataset_name}'...")
+    print(f"[DataLoader] Starting initial preload for dataset '{dataset_name}'...")
 
     try:
       # Preload basic splits
@@ -36,15 +36,15 @@ class DataLoaderManager:
       for split in splits_to_preload:
         cache_key = f"{dataset_name}:{split}"
         if cache_key not in cls._dataset_cache:
-          print(f"  Downloading {split} data...")
+          print(f"[DataLoader]   Downloading {split} data...")
           # Explicitly specify cache directory
           cls._dataset_cache[cache_key] = load_dataset(dataset_name, split=split, cache_dir=str(CACHE_DIR))
-          print(f"  Loaded {split}: {len(cls._dataset_cache[cache_key])} samples")
+          print(f"[DataLoader]   Loaded {split}: {len(cls._dataset_cache[cache_key])} samples")
       cls._preloading_done.add(dataset_name)
-      print(f"Dataset '{dataset_name}' preloading completed!")
+      print(f"[DataLoader] Dataset '{dataset_name}' preloading completed!")
 
     except Exception as e:
-      print(f"Error during preloading (continuing execution): {e}")
+      print(f"[DataLoader] Error during preloading (continuing execution): {e}")
       # Set flag even on error to prevent duplicate attempts
       cls._preloading_done.add(dataset_name)
 
@@ -57,10 +57,10 @@ class DataLoaderManager:
     cache_key = f"{dataset_name}:{split}"
 
     if cache_key not in cls._dataset_cache:
-      print(f"Downloading additional dataset: {cache_key}")
+      print(f"[DataLoader] Downloading additional dataset: {cache_key}")
       cls._dataset_cache[cache_key] = load_dataset(dataset_name, split=split, cache_dir=str(CACHE_DIR))
     else:
-      print(f"Using cached dataset: {cache_key}")
+      print(f"[DataLoader] Using cached dataset: {cache_key}")
 
     return cls._dataset_cache[cache_key]
 
