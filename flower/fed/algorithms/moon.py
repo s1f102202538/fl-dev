@@ -7,21 +7,12 @@ from ..models.base_model import BaseModel
 
 
 class MoonContrastiveLearning:
-  """FedMoon対比学習"""
-
   def __init__(
     self,
     mu: float = 5.0,
     temperature: float = 0.5,
     device: torch.device | None = None,
   ):
-    """Moon対比学習を初期化
-
-    Args:
-        mu: 対比損失の重み
-        temperature: 対比損失の温度
-        device: 計算に使用するデバイス
-    """
     self.mu = mu
     self.temperature = temperature
     self.device = device or torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -31,12 +22,6 @@ class MoonContrastiveLearning:
     self.previous_model = None  # 単一の前回モデルを保持
 
   def update_models(self, previous_model: BaseModel, global_model: BaseModel) -> None:
-    """グローバルモデルと前回モデルの状態を更新
-
-    Args:
-        previous_model: 前回のローカルモデル
-        global_model: グローバルモデル
-    """
     # 前回のローカルモデルを保存
     if self.previous_model is None:
       self.previous_model = copy.deepcopy(previous_model)
@@ -62,18 +47,9 @@ class MoonContrastiveLearning:
     self.global_model.to(self.device)  # デバイスに移動
 
     has_previous = self.previous_model is not None
-    print(f"MOON models updated: mu={self.mu}, temperature={self.temperature}, has_previous_model={has_previous}")
+    print(f"[MOON] Models updated: mu={self.mu}, temperature={self.temperature}, has_previous_model={has_previous}")
 
   def compute_contrastive_loss(self, features: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
-    """対比損失計算
-
-    Args:
-        features: ローカルモデルからの投影特徴量
-        images: 入力画像
-
-    Returns:
-        対比損失テンソル
-    """
     if self.global_model is None or self.previous_model is None:
       return torch.tensor(0.0, device=self.device, requires_grad=True)
 
@@ -106,7 +82,7 @@ class MoonContrastiveLearning:
 
     # NaN/Inf check
     if torch.isnan(logits).any() or torch.isinf(logits).any():
-      print("Warning: NaN/Inf detected in logits. Returning zero tensor.")
+      print("[MOON] Warning: NaN/Inf detected in contrastive logits. Returning zero loss.")
       return torch.tensor(0.0, device=self.device, requires_grad=True)
 
     # ラベル：正例が0番目
@@ -120,19 +96,11 @@ class MoonContrastiveLearning:
 
 
 class MoonTrainer:
-  """FedMoon訓練実装"""
-
   def __init__(
     self,
     moon_learner: MoonContrastiveLearning,
     device: torch.device | None = None,
   ):
-    """Moonトレーナーを初期化
-
-    Args:
-        moon_learner: Moon対比学習インスタンス
-        device: 計算に使用するデバイス
-    """
     self.moon_learner = moon_learner
     self.device = device or torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -144,19 +112,6 @@ class MoonTrainer:
     epochs: int,
     args_optimizer: str = "sgd",
   ) -> float:
-    """FedMoon対比学習による訓練
-
-    Args:
-        model: ニューラルネットワークモデル
-        train_loader: 訓練データローダー
-        lr: 学習率
-        epochs: エポック数
-        args_optimizer: オプティマイザータイプ
-        weight_decay: 重み減衰
-
-    Returns:
-        平均訓練損失
-    """
     model.to(self.device)
     criterion = nn.CrossEntropyLoss().to(self.device)
 
@@ -200,13 +155,11 @@ class MoonTrainer:
 
         # NaN detection and handling
         if torch.isnan(total_loss) or torch.isinf(total_loss):
-          print(f"Warning: Loss became NaN/Inf. loss1={loss1.item()}, loss2={loss2.item()}")
-          continue  # Skip this batch
+          print(f"[MOON] Warning: Loss became NaN/Inf. CE Loss={loss1.item():.4f}, Contrastive Loss={loss2.item():.4f}. Skipping batch.")
+          continue
 
         total_loss.backward()
-
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-
         optimizer.step()
 
         running_loss += total_loss.item()

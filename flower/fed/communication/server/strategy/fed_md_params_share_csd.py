@@ -32,7 +32,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader
 
 
-class FedMoonParamsShare(Strategy):
+class FedMdParamsShareCsd(Strategy):
   def __init__(
     self,
     *,
@@ -74,6 +74,11 @@ class FedMoonParamsShare(Strategy):
     # Aggregated logits from clients (for server-side distillation)
     self.aggregated_logits: List[Tensor] = []
 
+    # Class prototypes for CSD (Class Prototype Similarity Distillation)
+    self.class_prototypes: Optional[Tensor] = None
+    self.n_classes: int = 10  # Number of classes (default CIFAR-10/MNIST)
+    self.alpha: float = 0.5  # Weight for moving average update of class prototypes
+
     # Knowledge distillation temperature
     self.kd_temperature = kd_temperature
 
@@ -97,7 +102,7 @@ class FedMoonParamsShare(Strategy):
   def _init_wandb_project(self) -> None:
     """Initialize W&B project."""
     wandb_project_name = os.getenv("WANDB_PROJECT_NAME", "federated-learning-default")
-    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedMoonParamsShare")
+    wandb.init(project=wandb_project_name, name=f"{str(self.run_dir)}-ServerApp-FedKDCSD")
     print(f"[W&B] Initialized project: {wandb_project_name}")
 
   def _aggregate_logits(self, client_logits_list: List[List[Tensor]], weights: List[int]) -> List[Tensor]:
@@ -120,6 +125,57 @@ class FedMoonParamsShare(Strategy):
 
     return aggregated
 
+  def _create_class_prototypes(self, server_round: int) -> Tensor:
+    print(f"[Server-CSD] Round {server_round}: Creating class prototypes from aggregated logits")
+
+    # Collect all labels from public data
+    all_labels = []
+    all_logits = []
+
+    with torch.no_grad():
+      for batch_idx, batch in enumerate(self.public_data_loader):
+        if batch_idx >= len(self.aggregated_logits):
+          break
+
+        labels = batch["label"]
+        logits = self.aggregated_logits[batch_idx]
+
+        all_labels.append(labels)
+        all_logits.append(logits)
+
+    # Concatenate all batches
+    all_labels = torch.cat(all_labels, dim=0)  # [total_samples]
+    all_logits = torch.cat(all_logits, dim=0)  # [total_samples, logit_dim]
+
+    # Create class prototypes by averaging logits for each class
+    logit_dim = all_logits.shape[1]
+    new_prototypes = torch.zeros(self.n_classes, logit_dim, device=self.device)
+    class_counts = torch.zeros(self.n_classes, device=self.device)
+
+    for class_id in range(self.n_classes):
+      # Find samples belonging to this class
+      class_mask = all_labels == class_id
+      class_logits = all_logits[class_mask]
+
+      if len(class_logits) > 0:
+        # Average logits for this class to create prototype
+        new_prototypes[class_id] = class_logits.mean(dim=0)
+        class_counts[class_id] = len(class_logits)
+
+    # Update class prototypes using weighted moving average
+    if self.class_prototypes is None:
+      # First round: initialize with new prototypes
+      self.class_prototypes = new_prototypes
+      print(f"[FedKD-CSD] Round {server_round}: Initialized prototypes for {self.n_classes} classes")
+    else:
+      # Subsequent rounds: weighted update
+      self.class_prototypes = (1 - self.alpha) * self.class_prototypes + self.alpha * new_prototypes
+      print(f"[FedKD-CSD] Round {server_round}: Updated prototypes with alpha={self.alpha}")
+
+    print(f"[FedKD-CSD] Samples per class: {class_counts.cpu().tolist()}")
+
+    return self.class_prototypes
+
   def _distill_server_model(self, server_round: int) -> None:
     """Perform knowledge distillation on server model using aggregated client logits."""
 
@@ -130,14 +186,14 @@ class FedMoonParamsShare(Strategy):
     )
 
     self.server_model = distillation.train_knowledge_distillation(
-      epochs=5,
+      epochs=20,
       learning_rate=0.001,
       T=self.kd_temperature,
-      alpha=0.3,
-      beta=0.7,
+      alpha=0.7,
+      beta=0.3,
       device=self.device,
     )
-    print(f"[FedMoon-ParamsShare] Round {server_round}: Server model distillation completed")
+    print(f"[Server] Round {server_round}: Server model distillation completed")
 
   def store_results_and_log(self, server_round: int, tag: str, results_dict: Dict) -> None:
     """A helper method that stores results and logs them to W&B if enabled."""
@@ -157,7 +213,7 @@ class FedMoonParamsShare(Strategy):
   @override
   def initialize_parameters(self, client_manager: ClientManager) -> Optional[Parameters]:
     """Initialize global model parameters to send to clients."""
-    print("[FedMoon-ParamsShare] Initializing server model parameters")
+    print("[Server] Initializing server model parameters")
 
     # Return initial model parameters
     initial_parameters = self.initial_parameters
@@ -169,25 +225,34 @@ class FedMoonParamsShare(Strategy):
         first_layer_mean = float(initial_ndarrays[0].mean())
         first_layer_std = float(initial_ndarrays[0].std())
         first_layer_sum = float(initial_ndarrays[0].sum())
-        print(f"[FedMoon-ParamsShare] INITIAL parameters - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}")
+        print(f"[Server] Initial parameters - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}")
 
     self.initial_parameters = None
     return initial_parameters
 
   @override
   def configure_fit(self, server_round: int, parameters: Parameters, client_manager: ClientManager) -> List[Tuple[ClientProxy, FitIns]]:
-    """Configure the next round of training by sending model parameters to clients."""
+    """Configure the next round of training by sending model parameters and class prototypes to clients."""
     config: Dict[str, Scalar] = {"temperature": self.kd_temperature}
     if self.on_fit_config_fn is not None:
       custom_config = self.on_fit_config_fn(server_round)
       config.update(custom_config)
       config["temperature"] = self.kd_temperature
 
+    # Add class prototypes to config if available
+    if self.class_prototypes is not None:
+      # Convert class prototypes to base64 string for transmission
+      from fed.util.model_util import batch_list_to_base64
+
+      prototypes_list = [self.class_prototypes]  # Wrap in list for batch_list_to_base64
+      config["class_prototypes"] = batch_list_to_base64(prototypes_list)
+      print(f"[FedKD-CSD] Round {server_round}: Sending class prototypes to clients (shape: {self.class_prototypes.shape})")
+
     # Send server model parameters to clients
     ndarrays = [val.cpu().numpy() for _, val in self.server_model.state_dict().items()]
     parameters = ndarrays_to_parameters(ndarrays)
 
-    print(f"[FedMoon-ParamsShare] Round {server_round}: Sending model parameters to clients")
+    print(f"[FedKD-ParamsShare] Round {server_round}: Sending model parameters to clients")
 
     fit_ins = FitIns(parameters, config)
 
@@ -222,7 +287,7 @@ class FedMoonParamsShare(Strategy):
         client_weights.append(fit_res.num_examples)
 
     if not client_logits_list:
-      print(f"[FedMoon-ParamsShare] Round {server_round}: No logits received from clients")
+      print(f"[Server] Round {server_round}: No logits received from clients")
       return None, {}
 
     # Calculate communication costs
@@ -237,12 +302,15 @@ class FedMoonParamsShare(Strategy):
     self.communication_costs["total_round_mb"].append(total_size_mb)
 
     print(
-      f"[FedMoon-ParamsShare] Round {server_round}: Server->Client params: {params_size_mb:.4f} MB, Client->Server logits: {logits_size_mb:.4f} MB, total: {total_size_mb:.4f} MB"
+      f"[FedKD-ParamsShare] Round {server_round}: Server->Client params: {params_size_mb:.4f} MB, Client->Server logits: {logits_size_mb:.4f} MB, total: {total_size_mb:.4f} MB"
     )
 
-    # Aggregate logits using weighted average
+    # Aggregate logits using simple average
     self.aggregated_logits = self._aggregate_logits(client_logits_list, client_weights)
-    print(f"[FedMoon-ParamsShare] Round {server_round}: Aggregated {len(self.aggregated_logits)} logit batches from {len(client_logits_list)} clients")
+    print(f"[FedKD-CSD] Round {server_round}: Aggregated {len(self.aggregated_logits)} logit batches from {len(client_logits_list)} clients")
+
+    # Create class prototypes from aggregated logits
+    self.class_prototypes = self._create_class_prototypes(server_round)
 
     # Perform knowledge distillation on server model using aggregated logits
     self._distill_server_model(server_round)
@@ -255,7 +323,7 @@ class FedMoonParamsShare(Strategy):
     first_layer_std = float(updated_ndarrays[0].std())
     first_layer_sum = float(updated_ndarrays[0].sum())
     print(
-      f"[FedMoon-ParamsShare] Round {server_round}: Server model after distillation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
+      f"[Server] Round {server_round}: Server model after distillation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
     )
 
     # Aggregate custom metrics if aggregation function is provided
@@ -292,7 +360,7 @@ class FedMoonParamsShare(Strategy):
     first_layer_std = float(ndarrays[0].std())
     first_layer_sum = float(ndarrays[0].sum())
     print(
-      f"[FedMoon-ParamsShare] Round {server_round}: Sending server model parameters for evaluation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
+      f"[Server] Round {server_round}: Sending server model parameters for evaluation - first layer mean: {first_layer_mean:.6f}, std: {first_layer_std:.6f}, sum: {first_layer_sum:.6f}"
     )
 
     evaluate_ins = EvaluateIns(parameters, config)
@@ -327,7 +395,7 @@ class FedMoonParamsShare(Strategy):
     # Log accuracy information
     if "accuracy" in metrics_aggregated:
       accuracy = metrics_aggregated["accuracy"]
-      print(f"[FedMoon-ParamsShare] Round {server_round}: Federated evaluation accuracy: {accuracy:.4f}")
+      print(f"[Server] Round {server_round}: Federated evaluation accuracy: {accuracy:.4f}")
 
     # Store and log results
     self.store_results_and_log(server_round, "federated_evaluate", {"federated_evaluate_loss": loss_aggregated, **metrics_aggregated})

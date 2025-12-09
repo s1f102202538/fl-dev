@@ -35,7 +35,6 @@ def weighted_average(metrics: List[Tuple[int, Dict[str, Any]]]) -> Dict[str, Sca
 
 
 def create_run_dir(config: UserConfig) -> Tuple[Path, str]:
-  """Create a directory where to save results from this run."""
   # Create output directory given current timestamp
   current_time = datetime.now()
   run_dir = current_time.strftime("%Y-%m-%d/%H-%M-%S")
@@ -51,51 +50,18 @@ def create_run_dir(config: UserConfig) -> Tuple[Path, str]:
 
 
 def batch_list_to_base64(batch_list: List[Tensor]) -> str:
-  """Convert a list of tensors (batches) to base64 string."""
   buffer = io.BytesIO()
   save(batch_list, buffer)
   return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
 def base64_to_batch_list(b64str: str) -> List[Tensor]:
-  """Convert base64 string to a list of tensors (batches)."""
   buffer = io.BytesIO(base64.b64decode(b64str))
   return load(buffer)
 
 
-def filter_and_calibrate_logits(logit_batches: List[Tensor]) -> List[Tensor]:
-  """ロジットの基本的な較正処理（元の簡素版に復元）
-
-  Args:
-      logit_batches: 較正対象のロジットバッチリスト
-
-  Returns:
-      較正されたロジットバッチリスト
-  """
-  filtered_logits = []
-  for batch in logit_batches:
-    # NaN/Inf値の検出と修正
-    if torch.isnan(batch).any() or torch.isinf(batch).any():
-      print("警告: ロジット内のNaN/Infを検出、ゼロで置換")
-      batch = torch.zeros_like(batch)
-
-    # 極値のクリッピング（元の設定）
-    calibrated_batch = torch.clamp(batch, min=-10, max=10)
-
-    filtered_logits.append(calibrated_batch)
-
-  return filtered_logits
-
-
 # モデル状態管理用関数
 def save_model_to_state(model: BaseModel, client_state: RecordDict, model_name: str) -> None:
-  """モデルの重みをclient stateに保存
-
-  Args:
-      model: 保存するPyTorchモデル
-      client_state: Flowerのクライアント状態
-      model_name: 状態保存時の識別名
-  """
   if model is not None:
     arr_record = ArrayRecord(model.state_dict())  # type: ignore
     # RecordDictに追加（既に存在する場合は置換）
@@ -107,16 +73,6 @@ def load_model_from_state(
   reference_model: BaseModel,
   model_name: str,
 ) -> BaseModel | None:
-  """client stateからモデルの重みを読み込み
-
-  Args:
-      client_state: Flowerのクライアント状態
-      reference_model: モデル構造の参照用ベースモデル
-      model_name: 状態保存時の識別名
-
-  Returns:
-      復元されたモデル（復元失敗時はNone）
-  """
   if model_name not in client_state.array_records:
     return None
 

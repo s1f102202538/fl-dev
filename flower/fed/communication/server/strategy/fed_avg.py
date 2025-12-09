@@ -65,7 +65,7 @@ class CustomFedAvg(FedAvg):
       self.communication_costs["server_to_client_params_mb"].append(0.0)
       logger.log(
         INFO,
-        f"Round {server_round}: Sending initial parameters to {num_clients} clients (not counted in communication cost)",
+        f"[Server] Round {server_round}: Sending initial parameters to {num_clients} clients (not counted in communication cost)",
       )
     else:
       # ラウンド2以降は通信コストに含める
@@ -74,7 +74,7 @@ class CustomFedAvg(FedAvg):
       self.communication_costs["server_to_client_params_mb"].append(total_server_to_client_mb)
       logger.log(
         INFO,
-        f"Round {server_round}: Server->Client parameters: {comm_cost['size_mb']:.4f} MB per client, total: {total_server_to_client_mb:.4f} MB ({num_clients} clients)",
+        f"[Server] Round {server_round}: Server->Client parameters: {comm_cost['size_mb']:.4f} MB per client, total: {total_server_to_client_mb:.4f} MB ({num_clients} clients)",
       )
 
     return config_list
@@ -98,7 +98,7 @@ class CustomFedAvg(FedAvg):
     total_round_mb = server_to_client_params_mb + total_params_mb
     self.communication_costs["total_round_mb"].append(total_round_mb)
 
-    logger.log(INFO, f"Round {server_round}: Client->Server params: {total_params_mb:.4f} MB, total: {total_round_mb:.4f} MB")
+    logger.log(INFO, f"[Server] Round {server_round}: Client->Server params: {total_params_mb:.4f} MB, total: {total_round_mb:.4f} MB")
 
     # 基底クラスのaggregate_fitを呼び出し
     parameters, metrics = super().aggregate_fit(server_round, results, failures)

@@ -53,8 +53,6 @@ class ModelFedCon(BaseModel):
 
 
 class ModelFedCon_noheader(BaseModel):
-  """統一されたベースのMOONモデル（projection headなし）"""
-
   def __init__(self, base_model: str, n_classes: int = 10):
     super().__init__()
 

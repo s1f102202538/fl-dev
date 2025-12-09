@@ -180,16 +180,6 @@ def get_device(device_arg: str) -> torch.device:
 
 
 def load_iid_train_data(dataset_name: str, batch_size: int, train_samples: int) -> DataLoader:
-  """IID訓練データをロード
-
-  Args:
-      dataset_name: データセット名（Hugging Face Hub形式）
-      batch_size: バッチサイズ
-      train_samples: 使用する訓練サンプル数（Noneの場合は全データ）
-
-  Returns:
-      訓練データのDataLoader
-  """
   print(f"📦 Loading train dataset: {dataset_name}")
 
   # 訓練データをロード
@@ -223,25 +213,12 @@ def load_iid_train_data(dataset_name: str, batch_size: int, train_samples: int) 
 
 
 def load_iid_test_data(dataset_name: str, batch_size: int, test_samples: int) -> DataLoader:
-  """IIDテストデータをロード
-
-  Args:
-      dataset_name: データセット名（Hugging Face Hub形式）
-      batch_size: バッチサイズ
-      test_samples: 使用するテストサンプル数（Noneの場合は全データ）
-
-  Returns:
-      テストデータのDataLoader
-  """
   print(f"📦 Loading test dataset: {dataset_name}")
 
   # テストデータをロード
   if test_samples is not None:
     split_str = f"test[:{test_samples}]"
     print(f"   Using {test_samples} test samples")
-  else:
-    split_str = "test"
-    print("   Using all available test samples")
 
   test_dataset = load_dataset(dataset_name, split=split_str)
 
@@ -267,17 +244,6 @@ def load_iid_test_data(dataset_name: str, batch_size: int, test_samples: int) ->
 
 
 def evaluate_model(model, test_loader, device, verbose=False):
-  """モデルを評価
-
-  Args:
-      model: 評価するモデル
-      test_loader: テストデータローダー
-      device: 使用するデバイス
-      verbose: 詳細ログの表示
-
-  Returns:
-      (loss, accuracy)のタプル
-  """
   print(f"\n🔍 Evaluating model on {device}")
   print(f"   Total batches: {len(test_loader)}")
 
@@ -288,19 +254,6 @@ def evaluate_model(model, test_loader, device, verbose=False):
 
 
 def train_model(model, train_loader, epochs, lr, device, verbose=False):
-  """モデルを訓練
-
-  Args:
-      model: 訓練するモデル
-      train_loader: 訓練データローダー
-      epochs: エポック数
-      lr: 学習率
-      device: 使用するデバイス
-      verbose: 詳細ログの表示
-
-  Returns:
-      最終エポックの平均訓練損失
-  """
   print(f"\n🏋️  Training model on {device}")
   print(f"   Epochs: {epochs}")
   print(f"   LearninBatchesg rate: {lr}")

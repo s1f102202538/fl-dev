@@ -1,4 +1,4 @@
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn
@@ -17,16 +17,7 @@ class Distillation:
     studentModel: BaseModel,
     public_data: DataLoader,
     soft_targets: List[torch.Tensor],
-    *,
-    shuffle_public_data: bool = False,
   ) -> None:
-    """
-    Args:
-        studentModel: 生徒モデル（BaseModel）
-        public_data: 公開データの DataLoader（**shuffle=False を推奨**）
-        soft_targets: サーバから渡されたソフトターゲット（通常は logits のリスト）
-        shuffle_public_data: DataLoader が shuffle=True の場合、対応が崩れるので False を推奨
-    """
     self.studentModel = studentModel
     self.public_data = public_data
     self.soft_targets = soft_targets
@@ -34,9 +25,6 @@ class Distillation:
     self.is_batch_list = isinstance(soft_targets, list) and len(soft_targets) > 0 and isinstance(soft_targets[0], torch.Tensor)
     if self.is_batch_list:
       self._validate_batch_counts()
-
-    if shuffle_public_data:
-      print("Warning: public_data was created with shuffle=True. This often breaks correspondence with soft_targets.")
 
   def _validate_batch_counts(self) -> None:
     expected_batches = len(self.public_data)
@@ -72,21 +60,6 @@ class Distillation:
     grad_clip: float = 1.0,
     debug_print_first_batch: bool = True,
   ) -> BaseModel:
-    """
-    実際の蒸留学習ループ（改良版）
-
-    Args:
-        epochs: epoch 数
-        learning_rate: 学習率
-        T: 温度
-        alpha: KL 蒸留損失の重み
-        beta: CE 損失の重み
-        device: cpu / cuda device
-        early_stopping_patience: 早期終了の patience
-        grad_clip: 勾配クリッピングの max_norm
-        debug_print_first_batch: 先頭バッチ時にデバッグ統計を出力するか
-    """
-
     ce_loss = nn.CrossEntropyLoss()
     optimizer = Adam(self.studentModel.parameters(), lr=learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=3)
@@ -100,7 +73,7 @@ class Distillation:
     if not self.is_batch_list:
       raise ValueError("soft_targets must be a non-empty list of torch.Tensor (one tensor per public-data batch).")
 
-    # 事前に soft_targets を device に移動（遅延転送ではなく一括転送）
+    # 事前に soft_targets を device に移動
     # soft_targets の各要素はバッチ単位のテンソル (batch_size, num_classes) を想定
     self.soft_targets = [st.to(device) for st in self.soft_targets]
 
@@ -181,19 +154,17 @@ class Distillation:
         # debug print for first batch only (helps verifying distributions quickly)
         if debug_print_first_batch and epoch == 0 and batch_idx == 0:
           try:
-            print("=== Distillation debug (epoch 1, batch 1) ===")
-            print(f"teacher_probs sum (first 5): {teacher_probs.sum(dim=1)[:5].cpu().numpy()}")
+            print("[Distillation] === Debug (Epoch 1, Batch 1) ===")
+            print(f"[Distillation] Teacher probs sum (first 5): {teacher_probs.sum(dim=1)[:5].cpu().numpy()}")
             print(
-              f"teacher_probs stats: mean={teacher_probs.mean().item():.6f}, std={teacher_probs.std().item():.6f}, min={teacher_probs.min().item():.6f}, max={teacher_probs.max().item():.6f}"
+              f"[Distillation] Teacher probs stats: mean={teacher_probs.mean().item():.6f}, std={teacher_probs.std().item():.6f}, min={teacher_probs.min().item():.6f}, max={teacher_probs.max().item():.6f}"
             )
             print(
-              f"student_logits stats: mean={student_logits.mean().item():.6f}, std={student_logits.std().item():.6f}, min={student_logits.min().item():.6f}, max={student_logits.max().item():.6f}"
+              f"[Distillation] Student logits stats: mean={student_logits.mean().item():.6f}, std={student_logits.std().item():.6f}, min={student_logits.min().item():.6f}, max={student_logits.max().item():.6f}"
             )
-            print("=============================================")
+            print("[Distillation] ============================================")
           except Exception:
-            # 保険: データが GPU 上、numpy に変換できない等のケースで落ちないようにする
             pass
-          # only print once
           debug_print_first_batch = False
 
       # end batches
@@ -201,13 +172,13 @@ class Distillation:
       if batch_count > 0:
         epoch_loss = running_loss / batch_count
         scheduler.step(epoch_loss)
-        print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
+        print(f"[Distillation] Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.6f}, Processed batches: {batch_count}")
 
         should_stop, best_loss, patience_counter = self._check_early_stopping(epoch_loss, best_loss, patience_counter, early_stopping_patience)
         if should_stop:
-          print(f"Early stopping at epoch {epoch + 1}/{epochs}")
+          print(f"[Distillation] Early stopping at epoch {epoch + 1}/{epochs}")
           break
       else:
-        print(f"FedKD Distillation Epoch {epoch + 1}/{epochs}: No valid batches processed")
+        print(f"[Distillation] Epoch {epoch + 1}/{epochs}: No valid batches processed")
 
     return self.studentModel

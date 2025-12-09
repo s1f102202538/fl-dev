@@ -1,27 +1,16 @@
-"""FedKD with Parameter Sharing: Flower / PyTorch app - Clients return logits"""
-
 from typing import Dict, Tuple
 
 import torch
 from fed.models.base_model import BaseModel
 from fed.task.cnn_task import CNNTask
-from fed.util.model_util import batch_list_to_base64, get_weights, set_weights
+from fed.util.model_util import batch_list_to_base64, set_weights
 from flwr.client import NumPyClient
 from flwr.common import RecordDict
 from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
 
-class FedKdParamsShareClient(NumPyClient):
-  """FedKD client that receives parameters and returns logits.
-
-  This client:
-  1. Receives model parameters from server
-  2. Trains the model locally
-  3. Generates logits from trained model
-  4. Sends logits back to server
-  """
-
+class FedMdParamsShareClient(NumPyClient):
   def __init__(
     self,
     net: BaseModel,
@@ -42,23 +31,23 @@ class FedKdParamsShareClient(NumPyClient):
     self.public_test_data = public_test_data
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    """FedKD client training: receive parameters, train, return logits."""
+    """FedMD client training: receive parameters, train, return logits."""
 
     # Apply server parameters to local model
     if parameters is not None and len(parameters) > 0:
-      print("[INFO] Applying server parameters to local model")
+      print("[Client] Applying server parameters to local model")
       set_weights(self.net, parameters)
     else:
-      print("[INFO] No server parameters provided, using current model state")
+      print("[Client] No server parameters provided, using current model state")
 
     # Perform local training
     train_loss = self._perform_local_training()
-    print(f"Client training loss: {train_loss:.4f}")
+    print(f"[Client] Training loss: {train_loss:.4f}")
 
     # Generate logits from trained model
     logits = self._generate_logits()
     logits_base64 = batch_list_to_base64(logits)
-    print(f"[INFO] Generated {len(logits)} logit batches")
+    print(f"[Client] Generated {len(logits)} logit batches")
 
     # Return empty parameters (we're sending logits instead)
     return (
@@ -79,20 +68,20 @@ class FedKdParamsShareClient(NumPyClient):
       lr=0.01,
       device=self.device,
     )
-    print(f"[DEBUG] Local training completed with loss: {train_loss:.4f}")
+    print(f"[Client] Local training completed with loss: {train_loss:.4f}")
     return train_loss
 
   def _generate_logits(self) -> list:
     """Generate logits from the trained model."""
     logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    print(f"[DEBUG] Generated logits from {len(logits)} batches")
+    print(f"[Client] Generated logits from {len(logits)} batches")
     return logits
 
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
     """Evaluate model performance using server-provided parameters."""
     # Apply server parameters for evaluation
     if parameters is not None and len(parameters) > 0:
-      print("[DEBUG] Applying server model parameters for evaluation")
+      print("[Client] Applying server model parameters for evaluation")
       set_weights(self.net, parameters)
 
     loss, accuracy = CNNTask.test(self.net, self.val_loader, self.device)

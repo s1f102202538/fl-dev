@@ -8,8 +8,6 @@ from .base_model import BaseModel
 
 
 class MiniCNN(BaseModel):
-  """軽量なMiniCNNモデル - CIFAR-10対応"""
-
   def __init__(self, n_classes: int = 10, dropout_rate: float = 0.2) -> None:
     super().__init__()
 
@@ -45,8 +43,6 @@ class MiniCNN(BaseModel):
 
 
 class MiniCNNMNIST(BaseModel):
-  """軽量なMiniCNNモデル - MNIST/FashionMNIST対応"""
-
   def __init__(self, n_classes: int = 10, dropout_rate: float = 0.2) -> None:
     super().__init__()
 
@@ -115,8 +111,6 @@ class MiniCNN_header(nn.Module):
 
 
 class MiniCNNMNIST_header(nn.Module):
-  """MNIST用のMiniCNNヘッダー（特徴量抽出のみ）"""
-
   def __init__(self, dropout_rate: float = 0.2) -> None:
     super().__init__()
 

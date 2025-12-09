@@ -27,7 +27,7 @@ class DataLoaderManager:
     if dataset_name in cls._preloading_done:
       return
 
-    print(f"Starting initial preload for dataset '{dataset_name}'...")
+    print(f"[DataLoader] Starting initial preload for dataset '{dataset_name}'...")
 
     try:
       # Preload basic splits
@@ -36,15 +36,15 @@ class DataLoaderManager:
       for split in splits_to_preload:
         cache_key = f"{dataset_name}:{split}"
         if cache_key not in cls._dataset_cache:
-          print(f"  Downloading {split} data...")
+          print(f"[DataLoader]   Downloading {split} data...")
           # Explicitly specify cache directory
           cls._dataset_cache[cache_key] = load_dataset(dataset_name, split=split, cache_dir=str(CACHE_DIR))
-          print(f"  Loaded {split}: {len(cls._dataset_cache[cache_key])} samples")
+          print(f"[DataLoader]   Loaded {split}: {len(cls._dataset_cache[cache_key])} samples")
       cls._preloading_done.add(dataset_name)
-      print(f"Dataset '{dataset_name}' preloading completed!")
+      print(f"[DataLoader] Dataset '{dataset_name}' preloading completed!")
 
     except Exception as e:
-      print(f"Error during preloading (continuing execution): {e}")
+      print(f"[DataLoader] Error during preloading (continuing execution): {e}")
       # Set flag even on error to prevent duplicate attempts
       cls._preloading_done.add(dataset_name)
 
@@ -57,26 +57,15 @@ class DataLoaderManager:
     cache_key = f"{dataset_name}:{split}"
 
     if cache_key not in cls._dataset_cache:
-      print(f"Downloading additional dataset: {cache_key}")
+      print(f"[DataLoader] Downloading additional dataset: {cache_key}")
       cls._dataset_cache[cache_key] = load_dataset(dataset_name, split=split, cache_dir=str(CACHE_DIR))
     else:
-      print(f"Using cached dataset: {cache_key}")
+      print(f"[DataLoader] Using cached dataset: {cache_key}")
 
     return cls._dataset_cache[cache_key]
 
   @staticmethod
   def _validate_config(config: DataLoaderConfig) -> int:
-    """Validate configuration and return total test samples.
-
-    Args:
-      config: DataLoaderConfig instance
-
-    Returns:
-      Total number of test samples available
-
-    Raises:
-      ValueError: If configuration is invalid
-    """
     # Load dataset to check available samples (using cache)
     full_test_dataset = DataLoaderManager._get_cached_dataset(config.dataset_name, "test")
     total_test_samples = len(full_test_dataset)  # type: ignore
@@ -93,14 +82,6 @@ class DataLoaderManager:
     return total_test_samples
 
   def load_train_data(self, config: DataLoaderConfig) -> DataLoader:
-    """Load training data for federated learning.
-
-    Args:
-      config: DataLoaderConfig instance containing partition settings
-
-    Returns:
-      DataLoader for training data
-    """
     # Preload dataset (first time only, to avoid API rate limiting)
     self._preload_dataset_once(config.dataset_name)
 
@@ -129,14 +110,6 @@ class DataLoaderManager:
     return train_loader
 
   def load_test_data(self, config: DataLoaderConfig) -> DataLoader:
-    """Load test data for evaluation.
-
-    Args:
-      config: DataLoaderConfig instance
-
-    Returns:
-      DataLoader for evaluation test data
-    """
     # Validate configuration
     self._validate_config(config)
 
@@ -153,14 +126,6 @@ class DataLoaderManager:
     return test_loader
 
   def load_public_data(self, config: DataLoaderConfig) -> DataLoader:
-    """Load public data for knowledge distillation.
-
-    Args:
-      config: DataLoaderConfig instance
-
-    Returns:
-      DataLoader for public data
-    """
     # Validate configuration
     self._validate_config(config)
 

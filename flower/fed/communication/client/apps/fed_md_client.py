@@ -1,5 +1,3 @@
-"""FedKD with Logit Sharing: Flower / PyTorch app"""
-
 import copy
 from typing import Dict, Tuple
 
@@ -10,10 +8,8 @@ from fed.task.cnn_task import CNNTask
 from fed.util.model_util import (
   base64_to_batch_list,
   batch_list_to_base64,
-  filter_and_calibrate_logits,
   load_model_from_state,
   save_model_to_state,
-  set_weights,
 )
 from flwr.client import NumPyClient
 from flwr.common import RecordDict
@@ -21,9 +17,7 @@ from flwr.common.typing import NDArrays, UserConfigValue
 from torch.utils.data import DataLoader
 
 
-class FedKdClient(NumPyClient):
-  """FedKD client with knowledge distillation and logit sharing capabilities."""
-
+class FedMdClient(NumPyClient):
   def __init__(
     self,
     net: BaseModel,
@@ -48,7 +42,7 @@ class FedKdClient(NumPyClient):
     self.global_model_name = "global-model"
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    """FedKD client training with knowledge distillation and logit sharing."""
+    """FedMD client training with knowledge distillation and logit sharing."""
     # Optimized temperature parameter from analysis
     temperature = float(config.get("temperature", 3.0))  # Increased from 3.0 for better distillation
 
@@ -56,7 +50,7 @@ class FedKdClient(NumPyClient):
     if "avg_logits" in config and config["avg_logits"] is not None:
       self._perform_knowledge_distillation(config["avg_logits"], temperature)
     else:
-      print("[INFO] No server logits available, skipping distillation")
+      print("[Client] No server logits available, skipping distillation")
 
     # Perform local training
     train_loss = self._perform_local_training()
@@ -66,7 +60,7 @@ class FedKdClient(NumPyClient):
 
     filtered_logits = self._generate_and_filter_logits()
 
-    print(f"Client training loss: {train_loss:.4f}")
+    print(f"[Client] Training loss: {train_loss:.4f}")
 
     return (
       [],  # Empty list for logit-only sharing (no parameter aggregation)
@@ -84,10 +78,10 @@ class FedKdClient(NumPyClient):
     global_model_for_distillation = load_model_from_state(self.client_state, self.net, self.global_model_name)
     if global_model_for_distillation is not None:
       distillation_model = global_model_for_distillation
-      print("[DEBUG] Using saved global model for knowledge distillation")
+      print("[Client] Using saved global model for knowledge distillation")
     else:
       distillation_model = copy.deepcopy(self.net)
-      print("[DEBUG] No saved global model found, using current model for distillation")
+      print("[Client] No saved global model found, using current model for distillation")
 
     # Convert base64 logits to tensor batches
     logits = base64_to_batch_list(avg_logits)
@@ -111,7 +105,7 @@ class FedKdClient(NumPyClient):
 
     # Save distilled model as global model
     save_model_to_state(self.net, self.client_state, self.global_model_name)
-    print(f"[DEBUG] Knowledge distillation completed (temperature: {temperature:.3f})")
+    print(f"[Client] Knowledge distillation completed (temperature: {temperature:.3f})")
 
   def _perform_local_training(self) -> float:
     """Perform local training on the current model."""
@@ -122,21 +116,15 @@ class FedKdClient(NumPyClient):
       lr=0.01,
       device=self.device,
     )
-    print(f"[DEBUG] Local training completed with loss: {train_loss:.4f}")
+    print(f"[Client] Local training completed with loss: {train_loss:.4f}")
     return train_loss
 
   def _generate_and_filter_logits(self) -> list:
-    """Generate and filter logits for sharing with server using enhanced filtering."""
-
     # Generate raw logits using trained model
-    raw_logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
-    print(f"[DEBUG] Raw logits generated: {len(raw_logits)} batches")
+    logits = CNNTask.inference(self.net, self.public_test_data, device=self.device)
+    print(f"[Client] Generated {len(logits)} logit batches")
 
-    # Apply basic calibration without quality filtering
-    filtered_logits = filter_and_calibrate_logits(raw_logits)
-    print(f"[DEBUG] Calibrated logits: {len(filtered_logits)} batches (no filtering)")
-
-    return filtered_logits
+    return logits
 
   def evaluate(self, parameters: NDArrays, config: Dict) -> Tuple[float, int, Dict]:
     """Evaluate model performance on validation data."""
@@ -145,16 +133,16 @@ class FedKdClient(NumPyClient):
     # 蒸留済みグローバルモデルを評価
     loaded_global_model = load_model_from_state(self.client_state, self.net, self.global_model_name)
     if loaded_global_model is not None:
-      print(f"[INFO] Evaluating global model from round {current_round - 1}")
+      print(f"[Client] Evaluating global model from round {current_round - 1}")
       loss, accuracy = CNNTask.test(loaded_global_model, self.val_loader, device=self.device)
-      print(f"[INFO] Global model accuracy: {accuracy:.2f}%")
+      print(f"[Client] Global model accuracy: {accuracy:.2f}%")
       return (
         loss,
         len(self.val_loader.dataset),  # type: ignore
         {"accuracy": accuracy},
       )
     else:
-      print("[WARNING] No saved global model found")
+      print("[Client] Warning: No saved global model found")
       return (
         0.0,
         len(self.val_loader.dataset),  # type: ignore

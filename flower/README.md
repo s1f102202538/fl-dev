@@ -12,9 +12,18 @@
 - **コンテナ**: Dev Container
 - **Python**: 3.12+
 
-### 使用フレームワーク・ライブラリ | フレームワーク/ライブラリ | バージョン | 用途 | |------------------------|----------|------| | **Flower** | ≥1.18.0 | 連合学習フレームワーク（シミュレーション対応） | | **PyTorch** | 2.5.1 | 深層学習フレームワーク | | **TorchVision** | 0.20.1 | 画像処理・データセット | | **flwr-datasets** | ≥0.5.0 | Flower 用データセット管理 | | **Weights & Biases** | - | 実験管理・可視化（オプション） |
+### 使用フレームワーク・ライブラリ
+
+| フレームワーク/ライブラリ | バージョン | 用途 |
+|------------------------|----------|------|
+| **Flower** | ≥1.18.0 | 連合学習フレームワーク（シミュレーション対応） |
+| **PyTorch** | 2.5.1 | 深層学習フレームワーク |
+| **TorchVision** | 0.20.1 | 画像処理・データセット |
+| **flwr-datasets** | ≥0.5.0 | Flower 用データセット管理 |
+| **Weights & Biases** | - | 実験管理・可視化（オプション） |
 
 ## ディレクトリ構造
+```
 flower/
 ├── pyproject.toml              # プロジェクト設定（依存関係、Flower アプリ設定）
 ├── docs/                       # ドキュメント
@@ -31,8 +40,9 @@ flower/
 │   ├── communication/         # クライアント・サーバ通信
 │   │   ├── client/           # クライアント実装
 │   │   │   ├── apps/        # クライアントアプリケーション
-│   │   │   │   ├── fed_kd_client.py
-│   │   │   │   ├── fed_kd_params_share_client.py
+│   │   │   │   ├── fed_avg_client.py
+│   │   │   │   ├── fed_md_client.py
+│   │   │   │   ├── fed_md_params_share_client.py
 │   │   │   │   ├── fed_moon_client.py
 │   │   │   │   ├── fed_moon_params_share_client.py
 │   │   │   │   └── fed_moon_params_share_csd_client.py
@@ -40,30 +50,45 @@ flower/
 │   │   └── server/           # サーバ実装
 │   │       ├── apps/        # サーバアプリケーション
 │   │       │   ├── fed_avg_server.py
-│   │       │   ├── fed_kd_params_share_server.py
-│   │       │   └── fed_kd_params_share_csd_server.py
+│   │       │   ├── fed_md_avg_server.py
+│   │       │   ├── fed_md_distillation_model_server.py
+│   │       │   ├── fed_md_distillation_model_with_training_server.py
+│   │       │   ├── fed_md_params_share_server.py
+│   │       │   ├── fed_md_params_share_csd_server.py
+│   │       │   └── fed_md_weighted_avg_server.py
 │   │       ├── strategy/    # 集約戦略
 │   │       │   ├── fed_avg.py
-│   │       │   ├── fed_kd_params_share.py
-│   │       │   ├── fed_kd_params_share_csd.py
-│   │       │   └── fed_moon_params_share.py
+│   │       │   ├── fed_md_avg.py
+│   │       │   ├── fed_md_distillation_model.py
+│   │       │   ├── fed_md_distillation_model_with_training.py
+│   │       │   ├── fed_md_params_share.py
+│   │       │   └── fed_md_params_share_csd.py
 │   │       └── server_app.py # サーバルーティング
 │   ├── data/                  # データ管理
-│   │   ├── data_loader_config.py     # データローダー設定
-│   │   └── data_loader_manager.py    # データローダー管理
+│   │   ├── data_loader_config.py       # データローダー設定
+│   │   ├── data_loader_manager.py      # データローダー管理
+│   │   ├── data_transform_manager.py   # データ変換管理
+│   │   └── transformed_dataset.py      # 変換済みデータセット
 │   ├── models/                # モデル定義
 │   │   ├── base_model.py            # 基底モデル
 │   │   ├── mini_cnn.py              # Mini CNN
 │   │   ├── moon_model.py            # MOON モデル
-│   │   └── resnet.py                # ResNet
+│   │   └── simple_cnn.py            # Simple CNN
 │   ├── task/                  # タスク実装
 │   │   └── cnn_task.py             # CNN 訓練・評価・推論
 │   └── util/                  # ユーティリティ
 │       ├── communication_cost.py    # 通信コスト計算
-│       └── model_util.py            # モデルユーティリティ
+│       ├── create_model.py          # モデル生成
+│       ├── create_partitioner.py    # データ分割設定
+│       ├── data_loader.py           # データローダー作成
+│       ├── model_util.py            # モデルユーティリティ
+│       └── visualize_data.py        # データ可視化
 ├── outputs/                   # 実験結果出力
 └── scripts/                   # スクリプト
     ├── evaluate_model_accuracy.py
+    ├── plot_communication_cost.py
+    ├── plot_model_accuracy.py
+    ├── plot_propose_method_model_accuracy.py
     └── visualize_data_distribution.py
 ```
 
@@ -104,10 +129,13 @@ flower/
 
 - **client_app.py**: クライアントのルーティングハブ
   - client_name に基づいて適切なクライアントアプリを起動
-  - 対応クライアント: fed-kd-client, fed-kd-params-share-client, fed-moon-client, fed-moon-params-share-client, fed-moon-params-share-csd-client
+  - 対応クライアント: fed-avg-client, fed-md-client, fed-md-params-share-client, fed-moon-client, fed-moon-params-share-client, fed-moon-params-share-csd-client
 
 - **apps/**: 各クライアント実装
-  - **fed_kd_params_share_client.py**: パラメータ共有 + ロジット送信クライアント
+  - **fed_avg_client.py**: FedAvg 標準クライアント
+  - **fed_md_client.py**: FedMD（知識蒸留）クライアント
+  - **fed_md_params_share_client.py**: FedMD パラメータ共有 + ロジット送信クライアント
+  - **fed_moon_client.py**: MOON コントラスト学習クライアント
   - **fed_moon_params_share_client.py**: MOON + パラメータ共有クライアント
   - **fed_moon_params_share_csd_client.py**: CSD-MOON クライアント
 
@@ -115,16 +143,20 @@ flower/
 
 - **server_app.py**: サーバのルーティングハブ
   - server_name に基づいて適切なサーバアプリと戦略を起動
-  - 対応サーバ: fed-avg-server, fed-kd-params-share-server, fed-kd-params-share-csd-server
+  - 対応サーバ: fed-avg-server, fed-md-avg-server, fed-md-distillation-model-server, fed-md-distillation-model-with-training-server, fed-md-params-share-server, fed-md-params-share-csd-server, fed-md-weighted-avg-server
 
 - **strategy/**: 集約戦略
   - **fed_avg.py**: FedAvg（標準的な連合平均化）
-  - **fed_kd_params_share.py**: パラメータ配布 + ロジット集約 + 蒸留
-  - **fed_kd_params_share_csd.py**: CSD 統合版（クラスプロトタイプ生成）
-  - **fed_moon_params_share.py**: MOON パラメータ共有戦略
+  - **fed_md_avg.py**: FedMD 単純平均化戦略
+  - **fed_md_distillation_model.py**: FedMD 蒸留モデル戦略（ロジット集約のみ）
+  - **fed_md_distillation_model_with_training.py**: FedMD 蒸留モデル + 訓練戦略
+  - **fed_md_params_share.py**: FedMD パラメータ配布 + ロジット集約 + 蒸留
+  - **fed_md_params_share_csd.py**: FedMD CSD 統合版（クラスプロトタイプ生成）
+  - **fed_md_weighted_avg.py**: FedMD 重み付き平均化戦略
 
 - **apps/**: サーバアプリケーション
   - 各戦略を初期化し、ServerAppComponents を返す
+  - 戦略ごとに対応するサーバアプリが存在
 
 ### 3. fed/data/ - データ管理
 
@@ -139,6 +171,12 @@ flower/
   - create_public_test_data_loader(): サーバ用の公開テストデータ作成
   - IID / Non-IID 分割対応
 
+- **data_transform_manager.py**: データ変換の管理
+  - データ拡張や正規化などの変換処理を管理
+
+- **transformed_dataset.py**: 変換済みデータセット
+  - データセットに変換を適用したラッパークラス
+
 ### 4. fed/models/ - モデル定義
 
 ニューラルネットワークモデルの実装。
@@ -147,16 +185,17 @@ flower/
   - BaseModel: 全モデルの抽象基底クラス
   - predict(), forward() メソッドを定義
 
-- **mini_cnn.py**: シンプルな CNN
+- **mini_cnn.py**: Mini CNN
   - MiniCNN: 軽量な畳み込みニューラルネットワーク
   - CIFAR-10 などの小規模データセット用
+
+- **simple_cnn.py**: Simple CNN
+  - SimpleCNN: シンプルな CNN アーキテクチャ
+  - 基本的な画像分類タスク用
 
 - **moon_model.py**: MOON 用モデル
   - ModelFedCon: プロジェクションヘッド付き CNN
   - features → l1 → l2 (projection head) と features → l3 (classifier) の二つの出力
-
-- **resnet.py**: ResNet ベースモデル
-  - ResNet-18, ResNet-50 など
 
 ### 5. fed/task/ - タスク実装
 
@@ -177,10 +216,24 @@ flower/
   - パラメータやロジットのサイズを計算
   - MB 単位での通信量測定
 
+- **create_model.py**: モデル生成
+  - モデル名に基づいたモデルインスタンスの生成
+  - モデルファクトリー機能
+
+- **create_partitioner.py**: データ分割設定
+  - IID / Non-IID データ分割の設定を生成
+  - Partitioner インスタンスの作成
+
+- **data_loader.py**: データローダー作成
+  - データセットからデータローダーを作成するヘルパー関数
+
 - **model_util.py**: モデルユーティリティ
   - Base64 エンコード/デコード
   - バッチリストの変換
   - 実行ディレクトリの作成
+
+- **visualize_data.py**: データ可視化
+  - データ分布の可視化ヘルパー関数
 
 ## 実行方法
 
@@ -195,92 +248,10 @@ flwr run .
 
 ```toml
 [tool.flwr.app.config]
-model_name = "mini-cnn"              # モデル選択
+model_name = "mini-cnn"              # モデル選択（mini-cnn, simple-cnn, moon-model など）
 dataset_name = "uoft-cs/cifar10"     # データセット選択
-client_name = "fed-moon-params-share-client"  # クライアント選択
-server_name = "fed-kd-params-share-server"    # サーバ選択
+client_name = "fed-md-params-share-client"  # クライアント選択
+server_name = "fed-md-params-share-server"  # サーバ選択
 num_clients = 10                     # クライアント数
 num_rounds = 50                      # ラウンド数
 ```
-
-## 主要な連合学習戦略
-
-### 1. FedAvg (Federated Averaging)
-
-- 標準的な連合学習
-- 各クライアントがローカルで訓練 → サーバが重み付き平均化
-
-### 2. FedKD with Parameter Sharing
-
-- サーバがモデルパラメータをクライアントに配布
-- クライアントが訓練後にロジットを送信
-- サーバがロジットを集約して知識蒸留
-
-### 3. FedMoon with Parameter Sharing
-
-- MOON コントラスト学習を使用
-- グローバルモデルと前回モデルを用いた対比損失
-- パラメータ共有とロジット集約を組み合わせ
-
-### 4. CSD-based FedMoon
-
-- クラスプロトタイプを生成
-- プロトタイプとの類似度に基づく蒸留損失
-- クラス不均衡データに対応
-
-### 5. LoCa-based Distillation
-
-- 非正解クラスの確率を縮小
-- 正解クラスの確率を強調
-- 温度スケーリングと組み合わせた蒸留
-
-## 実験管理
-
-### Weights & Biases (W&B) 連携
-
-環境変数で W&B プロジェクトを設定：
-
-```bash
-export WANDB_PROJECT_NAME="your-project-name"
-```
-
-### 出力ディレクトリ
-
-実験結果は `outputs/YYYY-MM-DD/HH-MM-SS/` に保存されます：
-
-```
-outputs/
-└── 2025-11-30/
-    └── 14-30-00/
-        ├── results.json          # 評価結果
-        ├── best_model.pth        # ベストモデル（戦略による）
-        └── logs/                 # ログファイル
-```
-
-## トラブルシューティング
-
-### よくある問題
-
-1. **モジュールが見つからない**
-   ```bash
-   pip install -e .
-   ```
-
-2. **CUDA メモリ不足**
-   - バッチサイズを小さくする
-   - モデルサイズを縮小
-
-3. **データセットのダウンロードエラー**
-   - ネットワーク接続を確認
-   - Hugging Face Datasets のキャッシュをクリア
-
-## 参考文献
-
-- **Flower**: [https://flower.ai/](https://flower.ai/)
-- **MOON**: Li et al. "Model-Contrastive Federated Learning" (CVPR 2021)
-- **FedLC**: Zhang et al. "FedLC: Federated Learning with Logit Calibration" (NeurIPS 2022)
-- **Knowledge Distillation**: Hinton et al. "Distilling the Knowledge in a Neural Network" (2015)
-
-## ライセンス
-
-Apache License 2.0

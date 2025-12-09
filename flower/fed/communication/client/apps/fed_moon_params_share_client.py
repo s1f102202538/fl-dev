@@ -1,5 +1,3 @@
-"""FedMoon with Parameter Sharing: Flower / PyTorch app"""
-
 import copy
 from typing import Dict, Tuple
 
@@ -20,8 +18,6 @@ from torch.utils.data import DataLoader
 
 
 class FedMoonParamsShareClient(NumPyClient):
-  """FedMoon client that receives parameters and returns logits."""
-
   def __init__(
     self,
     net: BaseModel,
@@ -61,14 +57,12 @@ class FedMoonParamsShareClient(NumPyClient):
     )
 
   def fit(self, parameters: NDArrays, config: Dict) -> Tuple[NDArrays, int, Dict]:
-    """FedMoon client training: receive parameters, train with MOON, return logits."""
-
     # Apply server parameters to local model
     if parameters is not None and len(parameters) > 0:
-      print("[INFO] Applying server parameters to local model")
+      print("[Client] Applying server parameters to local model")
       set_weights(self.net, parameters)
     else:
-      print("[INFO] No server parameters provided, using current model state")
+      print("[Client] No server parameters provided, using current model state")
 
     # Load previous round model if available
     previous_round_model = self._load_previous_round_model()
@@ -83,12 +77,12 @@ class FedMoonParamsShareClient(NumPyClient):
     # Save current model state for next round
     save_model_to_state(self.net, self.client_state, self.local_model_name)
 
-    print(f"Client training loss: {train_loss:.4f}")
+    print(f"[Client] Training loss: {train_loss:.4f}")
 
     # Generate logits from trained model
     logits = self._generate_logits()
     logits_base64 = batch_list_to_base64(logits)
-    print(f"[INFO] Generated {len(logits)} logit batches")
+    print(f"[Client] Generated {len(logits)} logit batches")
 
     # Return empty parameters (we're sending logits instead)
     return (
@@ -104,15 +98,15 @@ class FedMoonParamsShareClient(NumPyClient):
     """Load the model from the previous training round."""
     previous_round_model = load_model_from_state(self.client_state, self.net, self.local_model_name)
     if previous_round_model is not None:
-      print("[DEBUG] Previous round model loaded successfully")
+      print("[Client] Previous round model loaded successfully")
     else:
-      print("[DEBUG] No previous model found, using initial model")
+      print("[Client] No previous model found, using initial model")
     return previous_round_model
 
   def _generate_logits(self) -> list:
     """Generate logits from the trained model."""
     logits = CNNTask.inference_with_loca_extended(self.net, self.public_test_data, device=self.device)
-    print(f"[DEBUG] Generated logits from {len(logits)} batches")
+    print(f"[Client] Generated logits from {len(logits)} batches")
     return logits
 
   def _update_model_history(self, previous_round_model: BaseModel) -> None:
@@ -122,13 +116,13 @@ class FedMoonParamsShareClient(NumPyClient):
 
     # MOON対比学習の設定
     self.moon_learner.update_models(previous_round_model, global_model)
-    print("Updated Moon learner with 1 previous model and current global model")
+    print("[Client] Updated MOON learner with previous model and current global model")
 
   def _perform_training(self) -> float:
     """Perform training using normal or MOON approach based on available model history."""
     # MOON学習が可能かチェック
     if self.moon_learner.previous_model is not None and self.moon_learner.global_model is not None:
-      print("[INFO] Performing MOON training with previous model")
+      print("[Client] Performing MOON training with previous model")
       return self.moon_trainer.train_with_moon(
         model=self.net,
         train_loader=self.train_loader,
@@ -137,7 +131,7 @@ class FedMoonParamsShareClient(NumPyClient):
         args_optimizer="sgd",
       )
     else:
-      print("[INFO] No previous model available, performing normal training")
+      print("[Client] No previous model available, performing normal training")
       return CNNTask.train(
         net=self.net,
         train_loader=self.train_loader,
@@ -150,7 +144,7 @@ class FedMoonParamsShareClient(NumPyClient):
     """Evaluate model performance using server-provided parameters."""
     # parametersがNoneまたは空でない場合、サーバーモデルのパラメータを適用
     if parameters is not None and len(parameters) > 0:
-      print("[DEBUG] Applying server model parameters for evaluation")
+      print("[Client] Applying server model parameters for evaluation")
       set_weights(self.net, parameters)
 
     loss, accuracy = CNNTask.test(self.net, self.val_loader, self.device)

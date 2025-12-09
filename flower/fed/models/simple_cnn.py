@@ -8,8 +8,6 @@ from .base_model import BaseModel
 
 # MOON論文で使用された軽量なSimpleCNNモデル
 class SimpleCNN(BaseModel):
-  """MOON論文準拠のSimpleCNN - CIFAR-10対応"""
-
   def __init__(self, output_dim: int = 10, input_dim: int = 16 * 5 * 5, hidden_dims: list = [120, 84]):
     super().__init__()
 
@@ -42,8 +40,6 @@ class SimpleCNN(BaseModel):
 
 
 class SimpleCNNMNIST(BaseModel):
-  """MOON論文準拠のSimpleCNN - MNIST対応"""
-
   def __init__(self, output_dim: int = 10, input_dim: int = 16 * 4 * 4, hidden_dims: list = [120, 84]):
     super().__init__()
 
@@ -77,8 +73,6 @@ class SimpleCNNMNIST(BaseModel):
 
 # 論文準拠の特徴量抽出用ヘッダークラス
 class SimpleCNN_header(nn.Module):
-  """MOON論文準拠のSimpleCNNヘッダー"""
-
   def __init__(self, input_dim: int = 16 * 5 * 5, hidden_dims: list = [120, 84]):
     super().__init__()
 
@@ -106,8 +100,6 @@ class SimpleCNN_header(nn.Module):
 
 
 class SimpleCNNMNIST_header(nn.Module):
-  """MOON論文準拠のSimpleCNNヘッダー - MNIST用（特徴量抽出のみ）"""
-
   def __init__(self, input_dim: int = 16 * 4 * 4, hidden_dims: list = [120, 84], output_dim: int = 10):
     super().__init__()
 

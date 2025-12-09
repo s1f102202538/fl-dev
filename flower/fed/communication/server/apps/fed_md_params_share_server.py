@@ -5,10 +5,10 @@ from flwr.server import ServerAppComponents, ServerConfig
 from torch import device
 from torch.utils.data import DataLoader
 
-from ..strategy.fed_kd_params_share import FedKDParamsShare
+from ..strategy.fed_md_params_share import FedMdParamsShare
 
 
-class FedKDParamsShareServer:
+class FedMdParamsShareServer:
   @staticmethod
   def create_server(
     server_model: BaseModel,
@@ -18,24 +18,6 @@ class FedKDParamsShareServer:
     run_config,
     num_rounds: int,
   ) -> ServerAppComponents:
-    """Create FedKD Parameter Sharing server.
-
-    This server:
-    1. Aggregates model parameters from clients (FedAvg-style)
-    2. Generates logits from aggregated model
-    3. Distributes logits to clients for knowledge distillation
-
-    Args:
-        server_model: Pre-created server-side model
-        public_data_loader: Pre-loaded public data loader for logit generation
-        server_device: Device to run server model on
-        use_wandb: Whether to use Weights & Biases for logging
-        run_config: Configuration for the federated learning run
-        num_rounds: Number of federated learning rounds
-
-    Returns:
-        ServerAppComponents with FedKDParamsShare strategy
-    """
     # Move server model to specified device
     server_model.to(server_device)
 
@@ -43,7 +25,7 @@ class FedKDParamsShareServer:
     initial_parameters = ndarrays_to_parameters(get_weights(server_model))
 
     # Create strategy with parameter aggregation and logit generation
-    strategy = FedKDParamsShare(
+    strategy = FedMdParamsShare(
       server_model=server_model,
       public_data_loader=public_data_loader,
       run_config=run_config,

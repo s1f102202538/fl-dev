@@ -4,10 +4,10 @@ from flwr.server import ServerAppComponents, ServerConfig
 from torch import device
 from torch.utils.data import DataLoader
 
-from ..strategy.fed_kd_distillation_model import FedKDDistillationModel
+from ..strategy.fed_md_distillation_model_with_training import FedMdDistillationModelWithTraining
 
 
-class FedKDDistillationModelServer:
+class FedMdDistillationModelWithTrainingServer:
   @staticmethod
   def create_server(
     server_model: BaseModel,
@@ -17,24 +17,11 @@ class FedKDDistillationModelServer:
     run_config,
     num_rounds: int,
   ) -> ServerAppComponents:
-    """Create FedKD Distillation Model server with server-side model training.
-
-    Args:
-        server_model: Pre-created server-side model
-        public_data_loader: Pre-loaded public data loader
-        server_device: Device to run server model on
-        use_wandb: Whether to use Weights & Biases for logging
-        run_config: Configuration for the federated learning run
-        num_rounds: Number of federated learning rounds
-
-    Returns:
-        ServerAppComponents with FedKDDistillationModel strategy
-    """
     # Move server model to specified device
     server_model.to(server_device)
 
     # Create strategy with server model and public data
-    strategy = FedKDDistillationModel(
+    strategy = FedMdDistillationModelWithTraining(
       server_model=server_model,
       public_data_loader=public_data_loader,
       run_config=run_config,
@@ -42,9 +29,11 @@ class FedKDDistillationModelServer:
       fraction_fit=1.0,
       fraction_evaluate=1.0,
       evaluate_metrics_aggregation_fn=weighted_average,
-      server_training_epochs=20,  # Server model training epochs
-      server_learning_rate=0.001,  # Server model learning rate
-      kd_temperature=3.0,  # Knowledge distillation temperature
+      distillation_epochs=5,
+      distillation_learning_rate=0.001,
+      public_training_epochs=5,
+      public_training_learning_rate=0.01,
+      kd_temperature=3.0,
       min_fit_clients=5,
       min_evaluate_clients=5,
       min_available_clients=5,
